@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+  <title>Mongo Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+  <div id="left">
+    <input type="text" id="search" placeholder="Search..." />
+    <div id="keyList"></div>
+  </div>
+
+  <div id="right">
+
+    <div class="metric-card">
+      <h2 id="shiftCount">Logs This Shift: 0</h2>
+    </div>
+
+    <div class="metric-card">
+      <h3>Last 12 Logs Loaded</h3>
+      <div id="recentLogs"></div>
+    </div>
+
+    <div class="metric-card">
+      <h3>Selected Record</h3>
+      <div id="recordSummary">Select a record...</div>
+    </div>
+
+    <details>
+      <summary>Raw JSON</summary>
+      <pre id="rawJson"></pre>
+    </details>
+
+  </div>
+
+  <script src="app.js"></script>
+
+</body>
+</html>
