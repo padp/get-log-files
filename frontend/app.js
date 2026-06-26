@@ -2,7 +2,7 @@
 let jsonData = [];
 let selectedDiv = null;
 
-const API_BASE = "https://YOUR-RENDER-APP.onrender.com";
+const API_BASE = "https://get-log-files.onrender.com";
 
 //--------------------------------------------------
 // Load data
