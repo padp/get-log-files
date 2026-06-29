@@ -193,6 +193,42 @@ def simplify_history(rows):
 # HISTORY WORKER (NON-BLOCKING)
 # ============================================================
 
+def backfill_start_weight():
+
+    docs = collection.find({
+        "startWeight": {"$exists": False},
+        "history": {"$exists": True}
+    }).limit(HISTORY_BATCH_SIZE)
+
+    for doc in docs:
+
+        history = doc.get("history", [])
+
+        if not history:
+            continue
+
+        # safer: find first valid StartWeight anywhere
+        start_weight = None
+
+        for h in reversed(history):
+            if h.get("StartWeight") is not None:
+                start_weight = h["StartWeight"]
+                break
+
+        if start_weight is None:
+            continue
+
+        collection.update_one(
+            {"_id": doc["_id"]},
+            {
+                "$set": {
+                    "startWeight": start_weight
+                }
+            }
+        )
+
+        print(f"[BACKFILL] {doc['_id']}")
+
 def process_history_queue():
 
     docs = collection.find({
@@ -230,7 +266,8 @@ def process_history_queue():
                     "LastName": latest.get("LastName"),
                     "Action": latest.get("LastAction"),
                     "Location": latest.get("Location"),
-                    "ChangeDate": latest.get("ChangeDate")
+                    "ChangeDate": latest.get("ChangeDate"),
+                    "StartWeight": latest.get("Quantity")
                 }
 
             collection.update_one(
@@ -286,6 +323,8 @@ def main():
 
             # 2. HISTORY ENRICHMENT (NON-BLOCKING)
             process_history_queue()
+            
+            backfill_start_weight()  
 
             # LOG
             if result:

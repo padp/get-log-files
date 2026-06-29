@@ -101,21 +101,30 @@ function updateDashboard() {
   const entries = getSortedEntries();
   const shiftStart = getCurrentShiftStart();
 
-  const logLength = (logWeight) => {
-    try {
-      const calculatedLength = logWeight / 4.9375;
-      const shortLengthTest = Math.abs(216 - calculatedLength);
-      const longLengthTest = Math.abs(240 - calculatedLength);
-      if (shortLengthTest > longLengthTest){
-        return 240;
-      } else{
-        return 216;
-      }
-    }
-    catch{
+const logLength = (data) => {
+  try {
+
+    if (!data || !Array.isArray(data.history) || data.history.length === 0) {
       return "";
     }
+
+    const startWeight = data.history[0]?.StartWeight;
+
+    if (!startWeight) {
+      return "";
+    }
+
+    const calculatedLength = startWeight / 4.9375;
+
+    const shortLengthTest = Math.abs(216 - calculatedLength);
+    const longLengthTest = Math.abs(240 - calculatedLength);
+
+    return shortLengthTest > longLengthTest ? 240 : 216;
+
+  } catch (e) {
+    return "";
   }
+};
 
   const shiftCount = entries.filter(v =>
     new Date(v.timeMoved.$date) >= shiftStart
@@ -143,7 +152,7 @@ function updateDashboard() {
       &nbsp;&nbsp;
       ${v.PartNo || ""}
       &nbsp;&nbsp;
-      ${logLength(v.Quantity)}
+      ${`${logLength(v, v.PartNo)} Inches`}
       <span style="float:right;color:#666;">
         ${new Date(v.timeMoved.$date).toLocaleTimeString()}
       </span>
