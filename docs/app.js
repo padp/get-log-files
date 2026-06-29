@@ -27,7 +27,7 @@ async function loadData() {
 //--------------------------------------------------
 function getSortedEntries() {
   return [...jsonData].sort((a, b) =>
-    new Date(b.timeMoved) - new Date(a.timeMoved)
+    new Date(b.timeMoved.$date) - new Date(a.timeMoved.$date)
   );
 }
 
@@ -55,7 +55,7 @@ function renderKeys() {
           ${row._id}
         </div>
         <div style="color:#666;font-size:12px;">
-          ${new Date(row.timeMoved).toLocaleString()}
+          ${new Date(row.timeMoved.$date).toLocaleString()}
         </div>
       `;
 
@@ -102,7 +102,7 @@ function updateDashboard() {
   const shiftStart = getCurrentShiftStart();
 
   const shiftCount = entries.filter(v =>
-    new Date(v.timeMoved) >= shiftStart
+    new Date(v.timeMoved.$date) >= shiftStart
   ).length;
 
   document.getElementById("shiftCount").textContent =
@@ -122,7 +122,7 @@ function updateDashboard() {
       &nbsp;&nbsp;
       ${v.PartNo || ""}
       <span style="float:right;color:#666;">
-        ${new Date(v.timeMoved).toLocaleTimeString()}
+        ${new Date(v.timeMoved.$date).toLocaleTimeString()}
       </span>
     `;
 
@@ -141,7 +141,7 @@ function showObject(obj) {
     <b>Heat:</b> ${obj.HeatNo || ""}<br>
     <b>Location:</b> ${obj.Location || ""}<br>
     <b>Quantity:</b> ${obj.Quantity || ""}<br>
-    <b>Time Moved:</b> ${new Date(obj.timeMoved).toLocaleString()}
+    <b>Time Moved:</b> ${new Date(obj.timeMoved.$date).toLocaleString()}
   `;
 
   document.getElementById("rawJson").textContent =
