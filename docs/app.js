@@ -103,13 +103,14 @@ function updateDashboard() {
 
 const logLength = (data) => {
   try {
-
+    console.log("entry");
     if (!data || !Array.isArray(data.history) || data.history.length === 0) {
+      console.log("if statement sent blank");
       return "";
     }
 
     const startWeight = data.startWeight;
-
+    console.log(startWeight);
     if (!startWeight) {
       return "";
     }
