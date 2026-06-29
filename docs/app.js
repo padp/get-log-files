@@ -108,7 +108,7 @@ const logLength = (data) => {
       return "";
     }
 
-    const startWeight = data.history[0]?.StartWeight;
+    const startWeight = data.startWeight;
 
     if (!startWeight) {
       return "";
