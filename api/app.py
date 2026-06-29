@@ -1,10 +1,18 @@
 from flask import Flask, request
+from flask_cors import CORS
 from pymongo import MongoClient
 from bson.json_util import dumps
 from datetime import datetime, timedelta
 import os
 
 app = Flask(__name__)
+
+CORS(
+    app,
+    origins=[
+        "https://padp.github.io"
+    ]
+)
 
 # ============================================================
 # Mongo Connection (Render ENV VAR)
