@@ -24,8 +24,9 @@ client = MongoClient(f"mongodb+srv://padpress1:{SQL_PASS}@cluster0.ywwxl.mongodb
 
 db = client["log_files"]
 
-collection = db["log_files"]
+lf_collection = db["log_files"]
 
+alloy_change_collection = db["campaigns"]
 
 # ============================================================
 # Helper: shift start logic (same as your JS)
@@ -73,7 +74,7 @@ def inventory():
         }
 
     docs = list(
-        collection.find(query).sort("timeMoved", -1)
+        lf_collection.find(query).sort("timeMoved", -1)
     )
 
     return dumps(docs)
@@ -86,7 +87,7 @@ def inventory():
 @app.route("/api/inventory/<path:item_id>", methods=["GET"])
 def inventory_item(item_id):
 
-    doc = collection.find_one({"_id": item_id})
+    doc = lf_collection.find_one({"_id": item_id})
 
     return dumps(doc)
 
@@ -120,7 +121,7 @@ def dashboard():
         }
     ]
 
-    result = list(collection.aggregate(pipeline))[0]
+    result = list(lf_collection.aggregate(pipeline))[0]
 
     shift_count = result["shiftCount"][0]["count"] if result["shiftCount"] else 0
 

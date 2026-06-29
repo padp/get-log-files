@@ -347,7 +347,7 @@ def main():
             # 2. HISTORY ENRICHMENT (NON-BLOCKING)
             process_history_queue()
             
-            backfill_start_weight()  
+            #backfill_start_weight()  
 
             # LOG
             if result:
