@@ -12,7 +12,14 @@ async function loadData() {
   try {
 
     const response = await fetch(`${API_BASE}/api/inventory`);
-    jsonData = await response.json();
+
+    const text = await response.text();
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+
+    jsonData = JSON.parse(text);
 
     renderKeys();
     updateDashboard();
@@ -21,7 +28,6 @@ async function loadData() {
     console.error("Load error:", err);
   }
 }
-
 //--------------------------------------------------
 // Sort
 //--------------------------------------------------
