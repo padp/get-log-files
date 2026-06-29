@@ -101,6 +101,22 @@ function updateDashboard() {
   const entries = getSortedEntries();
   const shiftStart = getCurrentShiftStart();
 
+  const logLength = (logWeight) => {
+    try {
+      const calculatedLength = logWeight / 4.9375;
+      const shortLengthTest = Math.abs(216 - calculatedLength);
+      const longLengthTest = Math.abs(240 - calculatedLength);
+      if (shortLengthTest > longLengthTest){
+        return 240;
+      } else{
+        return 216;
+      }
+    }
+    catch{
+      return "";
+    }
+  }
+
   const shiftCount = entries.filter(v =>
     new Date(v.timeMoved.$date) >= shiftStart
   ).length;
@@ -111,20 +127,90 @@ function updateDashboard() {
   const recent = document.getElementById("recentLogs");
   recent.innerHTML = "";
 
-  entries.slice(0, 12).forEach(v => {
+  entries.slice(0, shiftCount).forEach(v => {
 
     const row = document.createElement("div");
-    row.style.padding = "4px";
+    row.style.padding = "6px";
     row.style.borderBottom = "1px solid #eee";
 
-    row.innerHTML = `
+    // -----------------------------
+    // MAIN ROW HEADER
+    // -----------------------------
+    const header = document.createElement("div");
+
+    header.innerHTML = `
       <b>${v.SerialNo || ""}</b>
       &nbsp;&nbsp;
       ${v.PartNo || ""}
+      &nbsp;&nbsp;
+      ${logLength(v.Quantity)}
       <span style="float:right;color:#666;">
         ${new Date(v.timeMoved.$date).toLocaleTimeString()}
       </span>
     `;
+
+    // -----------------------------
+    // DROPDOWN (HISTORY)
+    // -----------------------------
+    const select = document.createElement("select");
+    select.style.width = "100%";
+    select.style.marginTop = "4px";
+    select.style.padding = "4px";
+
+    const defaultOption = document.createElement("option");
+    defaultOption.text = "View History...";
+    defaultOption.value = "";
+    select.appendChild(defaultOption);
+
+    if (Array.isArray(v.history)) {
+
+      v.history.forEach(h => {
+
+        const opt = document.createElement("option");
+
+        const name = `${h.FirstName || ""} ${h.LastName || ""}`.trim();
+        const action = h.LastAction || "";
+        const loc = h.Location || "";
+
+        opt.text = `${name} | ${action} | ${loc}`;
+        opt.value = JSON.stringify(h);
+
+        select.appendChild(opt);
+      });
+    }
+
+    // -----------------------------
+    // OPTIONAL DETAIL VIEW
+    // -----------------------------
+    const detail = document.createElement("div");
+    detail.style.fontSize = "12px";
+    detail.style.color = "#444";
+    detail.style.marginTop = "4px";
+
+    select.addEventListener("change", (e) => {
+
+      if (!e.target.value) {
+        detail.innerHTML = "";
+        return;
+      }
+
+      const h = JSON.parse(e.target.value);
+
+      detail.innerHTML = `
+        <b>User:</b> ${h.FirstName || ""} ${h.LastName || ""}<br>
+        <b>Action:</b> ${h.LastAction || ""}<br>
+        <b>Location:</b> ${h.Location || ""}<br>
+        <b>Update:</b> ${h.UpdateDate || ""}<br>
+        <b>Change:</b> ${h.ChangeDate || ""}
+      `;
+    });
+
+    // -----------------------------
+    // ASSEMBLE ROW
+    // -----------------------------
+    row.appendChild(header);
+    row.appendChild(select);
+    row.appendChild(detail);
 
     recent.appendChild(row);
   });
