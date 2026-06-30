@@ -1,47 +1,47 @@
-<div id="right">
+<!doctype html>
+<html>
+  <head>
+    <title>UACJ Paducah Log Load Tracker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
 
-    <div class="tabs">
-        <button class="tab active" data-tab="dashboard">
-            Dashboard
-        </button>
-
-        <button class="tab" data-tab="campaigns">
-            Campaigns
-        </button>
+  <body>
+    <div id="left">
+      <input type="text" id="search" placeholder="Search..." />
+      <div id="keyList"></div>
     </div>
 
-    <div id="dashboardTab" class="tab-content active">
+    <div id="right">
+      <div class="metric-card">
+        <h2 id="shiftCount">Logs This Shift: 0</h2>
+      </div>
 
-        <div class="metric-card">
-            <h2 id="shiftCount"></h2>
-        </div>
+      <div class="metric-card">
+        <h3>Log Details</h3>
+        <div id="recentLogs"></div>
+      </div>
 
-        <div class="metric-card">
-            <h3>Log Details</h3>
-            <div id="recentLogs"></div>
-        </div>
+      <div class="metric-card">
+        <h3>Campaign History</h3>
 
-        <div class="metric-card">
-            <h3>Selected Record</h3>
-            <div id="recordSummary"></div>
-        </div>
+        <select id="campaignSelect"></select>
 
+        <div id="campaignSummary"></div>
+
+        <div id="campaignLogs"></div>
+      </div>
+
+      <div class="metric-card">
+        <h3>Selected Record</h3>
+        <div id="recordSummary">Select a record...</div>
+      </div>
+
+      <details>
+        <summary>Raw JSON</summary>
+        <pre id="rawJson"></pre>
+      </details>
     </div>
 
-    <div id="campaignTab" class="tab-content">
-
-        <div class="metric-card">
-
-            <h3>Campaign History</h3>
-
-            <select id="campaignSelect"></select>
-
-            <div id="campaignSummary"></div>
-
-            <div id="campaignLogs"></div>
-
-        </div>
-
-    </div>
-
-</div>
+    <script src="app.js"></script>
+  </body>
+</html>
