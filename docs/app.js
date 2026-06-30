@@ -46,7 +46,7 @@ async function loadData() {
     campaigns = [...unsortedCampaigns].sort(
       (a, b) => new Date(b.startedAt) - new Date(a.startedAt)
     );
-
+    console.log(campaigns);
     renderCampaigns();
 
   } catch (err) {
