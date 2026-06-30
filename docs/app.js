@@ -44,7 +44,7 @@ async function loadData() {
     const unsortedCampaigns = await campaignResponse.json();
 
     campaigns = [...unsortedCampaigns].sort(
-      (a, b) => new Date(b.startedAt) - new Date(a.startedAt)
+      (a, b) => new Date(b.startedAt.$date) - new Date(a.startedAt.$date)
     );
     console.log(campaigns);
     renderCampaigns();
@@ -64,7 +64,6 @@ function renderCampaigns() {
     select.innerHTML = "<option>No campaigns found</option>";
     return;
   }
-  console.log(campaigns);
   campaigns.forEach((campaign, index) => {
 
     const option = document.createElement("option");
@@ -342,7 +341,7 @@ document
   });
 
 function showCampaign(index) {
-  console.log(campaigns);
+
   const campaign = campaigns[index];
 
   if (!campaign)
