@@ -1,6 +1,7 @@
 
 let jsonData = [];
 let selectedDiv = null;
+let campaigns = [];
 
 const API_BASE = "https://get-log-files.onrender.com";
 
@@ -38,9 +39,45 @@ async function loadData() {
       console.error("updateDashboard failed", e);
     }
 
+    const campaignResponse = await fetch(`${API_BASE}/api/campaigns`);
+    campaigns = await campaignResponse.json();
+
+    renderCampaigns();
+
   } catch (err) {
     console.error("Load error:", err);
   }
+}
+
+function renderCampaigns() {
+
+  const select = document.getElementById("campaignSelect");
+
+  select.innerHTML = "";
+
+  if (!campaigns.length) {
+
+    select.innerHTML =
+      "<option>No campaigns found</option>";
+
+    return;
+  }
+
+  campaigns.forEach((campaign, index) => {
+
+    const option = document.createElement("option");
+
+    option.value = index;
+
+    option.text =
+      `${campaign.alloy} (${new Date(campaign.started.$date).toLocaleString()})`;
+
+    select.appendChild(option);
+
+  });
+
+  showCampaign(0);
+
 }
 //--------------------------------------------------
 // Sort
@@ -292,3 +329,69 @@ window.addEventListener("load", async () => {
 
   setInterval(loadData, 30000);
 });
+
+document
+  .getElementById("campaignSelect")
+  .addEventListener("change", e => {
+
+    showCampaign(Number(e.target.value));
+
+  });
+
+function showCampaign(index) {
+
+  const campaign = campaigns[index];
+
+  if (!campaign)
+    return;
+
+  document.getElementById("campaignSummary").innerHTML = `
+
+        <b>Alloy:</b> ${campaign.alloy}<br>
+        <b>Started:</b> ${new Date(campaign.started.$date).toLocaleString()}<br>
+        <b>Ended:</b> ${campaign.ended
+      ? new Date(campaign.ended.$date).toLocaleString()
+      : "Current"
+    }<br>
+        <b>Logs:</b> ${campaign.logCount}<br>
+        <b>Total Weight:</b> ${campaign.totalWeight.toFixed(0)} lb<br>
+        <b>Total Length:</b> ${campaign.totalLength.toFixed(0)} in
+
+    `;
+
+  const container = document.getElementById("campaignLogs");
+
+  container.innerHTML = "";
+
+  campaign.logs.forEach(log => {
+
+    const row = document.createElement("div");
+
+    row.style.padding = "4px";
+    row.style.borderBottom = "1px solid #eee";
+
+    row.innerHTML = `
+
+            <b>${log.SerialNo}</b>
+
+            &nbsp;&nbsp;
+
+            ${log.PartNo}
+
+            &nbsp;&nbsp;
+
+            ${log.length}"
+
+            <span style="float:right">
+
+                ${Math.round(log.startWeight)} lb
+
+            </span>
+
+        `;
+
+    container.appendChild(row);
+
+  });
+
+}
