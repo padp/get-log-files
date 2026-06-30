@@ -64,7 +64,7 @@ function renderCampaigns() {
     select.innerHTML = "<option>No campaigns found</option>";
     return;
   }
-
+  console.log(campaigns);
   campaigns.forEach((campaign, index) => {
 
     const option = document.createElement("option");
