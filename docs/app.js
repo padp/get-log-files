@@ -40,7 +40,12 @@ async function loadData() {
     }
 
     const campaignResponse = await fetch(`${API_BASE}/api/campaigns`);
-    campaigns = await campaignResponse.json();
+
+    const unsortedCampaigns = await campaignResponse.json();
+
+    campaigns = [...unsortedCampaigns].sort(
+      (a, b) => new Date(b.startedAt) - new Date(a.startedAt)
+    );
 
     renderCampaigns();
 
@@ -51,30 +56,30 @@ async function loadData() {
 
 function renderCampaigns() {
 
-    const select = document.getElementById("campaignSelect");
+  const select = document.getElementById("campaignSelect");
 
-    select.innerHTML = "";
+  select.innerHTML = "";
 
-    if (!campaigns.length) {
-        select.innerHTML = "<option>No campaigns found</option>";
-        return;
-    }
+  if (!campaigns.length) {
+    select.innerHTML = "<option>No campaigns found</option>";
+    return;
+  }
 
-    campaigns.forEach((campaign, index) => {
+  campaigns.forEach((campaign, index) => {
 
-        const option = document.createElement("option");
+    const option = document.createElement("option");
 
-        option.value = index;
+    option.value = index;
 
-        const status = campaign.active ? " (Current)" : "";
+    const status = campaign.active ? " (Current)" : "";
 
-        option.text =
-            `${campaign.plexPart}${status} - ${new Date(getDate(campaign.startedAt)).toLocaleString()}`;
+    option.text =
+      `${campaign.plexPart}${status} - ${new Date(getDate(campaign.startedAt)).toLocaleString()}`;
 
-        select.appendChild(option);
-    });
+    select.appendChild(option);
+  });
 
-    showCampaign(0);
+  showCampaign(0);
 }
 
 //--------------------------------------------------
@@ -338,25 +343,24 @@ document
 
 function showCampaign(index) {
 
-    const campaign = campaigns[index];
+  const campaign = campaigns[index];
 
-    if (!campaign)
-        return;
+  if (!campaign)
+    return;
 
-    document.getElementById("campaignSummary").innerHTML = `
+  document.getElementById("campaignSummary").innerHTML = `
 
         <b>Plex Part:</b> ${campaign.plexPart}<br>
         <b>Alloy Code:</b> ${campaign.alloyCode}<br>
         <b>Started:</b> ${new Date(getDate(campaign.startedAt)).toLocaleString()}<br>
-        <b>Ended:</b> ${
-            campaign.active
-                ? "Currently Running"
-                : new Date(getDate(campaign.endedAt)).toLocaleString()
-        }<br>
+        <b>Ended:</b> ${campaign.active
+      ? "Currently Running"
+      : new Date(getDate(campaign.endedAt)).toLocaleString()
+    }<br>
         <b>Status:</b> ${campaign.active ? "Active" : "Complete"}
 
     `;
 
-    document.getElementById("campaignLogs").innerHTML =
-        "<i>Campaign details coming soon...</i>";
+  document.getElementById("campaignLogs").innerHTML =
+    "<i>Campaign details coming soon...</i>";
 }
