@@ -69,7 +69,7 @@ function renderCampaigns() {
         const status = campaign.active ? " (Current)" : "";
 
         option.text =
-            `${campaign.plexPart}${status} - ${new Date(campaign.startedAt).toLocaleString()}`;
+            `${campaign.plexPart}${status} - ${new Date(getDate(campaign.startedAt)).toLocaleString()}`;
 
         select.appendChild(option);
     });
@@ -347,11 +347,11 @@ function showCampaign(index) {
 
         <b>Plex Part:</b> ${campaign.plexPart}<br>
         <b>Alloy Code:</b> ${campaign.alloyCode}<br>
-        <b>Started:</b> ${new Date(campaign.startedAt).toLocaleString()}<br>
+        <b>Started:</b> ${new Date(getDate(campaign.startedAt)).toLocaleString()}<br>
         <b>Ended:</b> ${
             campaign.active
                 ? "Currently Running"
-                : new Date(campaign.endedAt).toLocaleString()
+                : new Date(getDate(campaign.endedAt)).toLocaleString()
         }<br>
         <b>Status:</b> ${campaign.active ? "Active" : "Complete"}
 
