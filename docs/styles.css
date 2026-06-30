@@ -25,6 +25,12 @@ body {
   padding: 8px;
 }
 
+#rightmost {
+  width: 380px;
+  overflow-y: auto;
+  border-left: 1px solid #ccc;
+}
+
 .item {
   cursor: pointer;
   padding: 5px;
