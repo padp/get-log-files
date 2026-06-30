@@ -51,34 +51,32 @@ async function loadData() {
 
 function renderCampaigns() {
 
-  const select = document.getElementById("campaignSelect");
+    const select = document.getElementById("campaignSelect");
 
-  select.innerHTML = "";
+    select.innerHTML = "";
 
-  if (!campaigns.length) {
+    if (!campaigns.length) {
+        select.innerHTML = "<option>No campaigns found</option>";
+        return;
+    }
 
-    select.innerHTML =
-      "<option>No campaigns found</option>";
+    campaigns.forEach((campaign, index) => {
 
-    return;
-  }
+        const option = document.createElement("option");
 
-  campaigns.forEach((campaign, index) => {
+        option.value = index;
 
-    const option = document.createElement("option");
+        const status = campaign.active ? " (Current)" : "";
 
-    option.value = index;
+        option.text =
+            `${campaign.plexPart}${status} - ${new Date(campaign.startedAt).toLocaleString()}`;
 
-    option.text =
-      `${campaign.alloy} (${new Date(campaign.started.$date).toLocaleString()})`;
+        select.appendChild(option);
+    });
 
-    select.appendChild(option);
-
-  });
-
-  showCampaign(0);
-
+    showCampaign(0);
 }
+
 //--------------------------------------------------
 // Sort
 //--------------------------------------------------
@@ -340,58 +338,25 @@ document
 
 function showCampaign(index) {
 
-  const campaign = campaigns[index];
+    const campaign = campaigns[index];
 
-  if (!campaign)
-    return;
+    if (!campaign)
+        return;
 
-  document.getElementById("campaignSummary").innerHTML = `
+    document.getElementById("campaignSummary").innerHTML = `
 
-        <b>Alloy:</b> ${campaign.alloy}<br>
-        <b>Started:</b> ${new Date(campaign.started.$date).toLocaleString()}<br>
-        <b>Ended:</b> ${campaign.ended
-      ? new Date(campaign.ended.$date).toLocaleString()
-      : "Current"
-    }<br>
-        <b>Logs:</b> ${campaign.logCount}<br>
-        <b>Total Weight:</b> ${campaign.totalWeight.toFixed(0)} lb<br>
-        <b>Total Length:</b> ${campaign.totalLength.toFixed(0)} in
+        <b>Plex Part:</b> ${campaign.plexPart}<br>
+        <b>Alloy Code:</b> ${campaign.alloyCode}<br>
+        <b>Started:</b> ${new Date(campaign.startedAt).toLocaleString()}<br>
+        <b>Ended:</b> ${
+            campaign.active
+                ? "Currently Running"
+                : new Date(campaign.endedAt).toLocaleString()
+        }<br>
+        <b>Status:</b> ${campaign.active ? "Active" : "Complete"}
 
     `;
 
-  const container = document.getElementById("campaignLogs");
-
-  container.innerHTML = "";
-
-  campaign.logs.forEach(log => {
-
-    const row = document.createElement("div");
-
-    row.style.padding = "4px";
-    row.style.borderBottom = "1px solid #eee";
-
-    row.innerHTML = `
-
-            <b>${log.SerialNo}</b>
-
-            &nbsp;&nbsp;
-
-            ${log.PartNo}
-
-            &nbsp;&nbsp;
-
-            ${log.length}"
-
-            <span style="float:right">
-
-                ${Math.round(log.startWeight)} lb
-
-            </span>
-
-        `;
-
-    container.appendChild(row);
-
-  });
-
+    document.getElementById("campaignLogs").innerHTML =
+        "<i>Campaign details coming soon...</i>";
 }
