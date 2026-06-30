@@ -20,7 +20,8 @@ CORS(
 
 SQL_PASS = os.environ.get("SQL_PASS")
 
-client = MongoClient(f"mongodb+srv://padpress1:{SQL_PASS}@cluster0.ywwxl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+client = MongoClient(
+    f"mongodb+srv://padpress1:{SQL_PASS}@cluster0.ywwxl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 
 db = client["log_files"]
 
@@ -31,6 +32,7 @@ alloy_change_collection = db["campaigns"]
 # ============================================================
 # Helper: shift start logic (same as your JS)
 # ============================================================
+
 
 def get_shift_start(now=None):
 
@@ -155,9 +157,9 @@ def campaigns():
 
     docs = list(
         alloy_change_collection
-            .find({})
-            .sort("started", -1)
-            .limit(limit)
+        .find({})
+        .sort("started", -1)
+        .limit(limit)
     )
 
     return dumps(docs)
@@ -165,6 +167,17 @@ def campaigns():
 # ============================================================
 # API: single campaign
 # ============================================================
+
+
+def calculate_length(weight):
+
+    if not weight:
+        return 0
+
+    length = weight / 4.9375
+
+    return 240 if abs(length-240) < abs(length-216) else 216
+
 
 @app.route("/api/campaigns/<campaign_id>", methods=["GET"])
 def campaign(campaign_id):
@@ -175,5 +188,56 @@ def campaign(campaign_id):
 
     return dumps(doc)
 
+
+@app.route("/api/campaigns/<campaign_id>")
+def campaign_details(campaign_id):
+
+    from bson import ObjectId
+
+    campaign = alloy_change_collection.find_one(
+        {"_id": ObjectId(campaign_id)}
+    )
+
+    if campaign is None:
+        return {"error": "Campaign not found"}, 404
+
+    query = {
+        "campaign": campaign["plexPart"],
+        "timeMoved": {
+            "$gte": campaign["startedAt"]
+        }
+    }
+
+    if campaign.get("endedAt"):
+        query["timeMoved"]["$lt"] = campaign["endedAt"]
+
+    logs = list(
+        lf_collection.find(query).sort("timeMoved", 1)
+    )
+
+    total_weight = 0
+    total_length = 0
+
+    for log in logs:
+
+        weight = log.get("startWeight", 0)
+
+        total_weight += weight
+        total_length += calculate_length(weight)
+
+    return dumps({
+
+        "campaign": campaign,
+
+        "stats": {
+            "logCount": len(logs),
+            "totalWeight": total_weight,
+            "totalLength": total_length
+        },
+
+        "logs": logs
+
+    })
+    
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

@@ -15,10 +15,70 @@ def simplify_history(rows):
             "FirstName": r.get("FirstName"),
             "LastName": r.get("LastName"),
             "LastAction": r.get("LastAction"),
-            "Location": r.get("Location")
+            "Location": r.get("Location"),
         })
 
     return out
+
+def extract_rows(raw):
+
+    if isinstance(raw, list):
+        return raw
+
+    if isinstance(raw, dict):
+        if "Data" in raw:
+            return raw.get("Data", {}).get("Rows", []) or []
+        if "Rows" in raw:
+            return raw.get("Rows", []) or []
+
+    return []
+
+def backfill_start_weight():
+
+    docs = collection.find({
+        "startWeight": {"$exists": False},
+        "SerialNo": {"$exists": True}
+    }).limit(HISTORY_BATCH_SIZE)
+
+    for doc in docs:
+
+        serial = doc["SerialNo"]
+
+        try:
+            # 1. ALWAYS use fresh Plex data
+            raw = get_container_history(serial)
+            rows = extract_rows(raw)
+
+            if not rows:
+                continue
+
+            # 2. simplify search for StartWeight
+            start_weight = None
+
+            for r in rows:
+                if r.get("Quantity") is not None:
+                    start_weight = r["Quantity"]
+                    break
+
+            if start_weight is None:
+                print(f"[SKIP] No StartWeight found for {serial}")
+                continue
+
+            # 3. update Mongo
+            collection.update_one(
+                {"_id": doc["_id"]},
+                {
+                    "$set": {
+                        "startWeight": start_weight
+                    }
+                }
+            )
+
+            print(f"[BACKFILL] {serial} → {start_weight}")
+
+        except Exception as e:
+            print(f"[ERROR] {serial}: {e}")
+            
 
 def process_history_queue():
 
@@ -58,7 +118,6 @@ def process_history_queue():
                     "Action": latest.get("LastAction"),
                     "Location": latest.get("Location"),
                     "ChangeDate": latest.get("ChangeDate"),
-                    "StartWeight": latest.get("Quantity")
                 }
 
             collection.update_one(

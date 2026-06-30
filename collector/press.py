@@ -1,8 +1,8 @@
-import requests
-from config import PRESS_API
+from database import client
+from datetime import datetime
 
 # ------------------------------------------------------------
-# Alloy mapping (Plex → your internal naming)
+# Alloy mapping
 # ------------------------------------------------------------
 
 ALLOY_MAP = {
@@ -13,29 +13,37 @@ ALLOY_MAP = {
     "006082": "8-6082"
 }
 
+press_collection = client["press_db"]["press_data"]
 
 # ------------------------------------------------------------
-# Core function: get raw press state
+# Core: get latest press state from Mongo
 # ------------------------------------------------------------
 
 def get_press_state():
     """
-    Returns raw press JSON from external API.
+    Returns latest press document from MongoDB using Date/Time field.
     """
-    resp = requests.get(PRESS_API, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
+
+    try:
+        doc = press_collection.find_one(
+            {},
+            sort=[("Date/Time", -1)]
+        )
+
+        if not doc:
+            return None
+
+        return [doc]  # preserve your existing API shape
+
+    except Exception:
+        return None
 
 
 # ------------------------------------------------------------
-# Normalized alloy functions
+# Alloy code
 # ------------------------------------------------------------
 
 def get_running_alloy_code():
-    """
-    Returns raw alloy code from press API (e.g. '006005').
-    Safe: never throws, never returns invalid overwrite values.
-    """
 
     try:
         data = get_press_state()
@@ -43,27 +51,16 @@ def get_running_alloy_code():
         if not data or not isinstance(data, list):
             return None
 
-        first = data[0] if len(data) > 0 else None
+        first = data[0]
 
-        if not isinstance(first, dict):
-            return None
-
-        alloy = first.get("Alloy")
-
-        if not alloy:
-            return None
-
-        return alloy
+        return first.get("Alloy")
 
     except Exception:
         return None
 
 
 def get_running_alloy():
-    """
-    Returns mapped Plex alloy name (e.g. '8-6005A').
-    Falls back to raw code if unknown.
-    """
+
     code = get_running_alloy_code()
 
     if not code:
