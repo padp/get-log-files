@@ -144,5 +144,36 @@ def health():
 # Run locally
 # ============================================================
 
+# ============================================================
+# API: campaign history
+# ============================================================
+
+@app.route("/api/campaigns", methods=["GET"])
+def campaigns():
+
+    limit = int(request.args.get("limit", 10))
+
+    docs = list(
+        alloy_change_collection
+            .find({})
+            .sort("started", -1)
+            .limit(limit)
+    )
+
+    return dumps(docs)
+
+# ============================================================
+# API: single campaign
+# ============================================================
+
+@app.route("/api/campaigns/<campaign_id>", methods=["GET"])
+def campaign(campaign_id):
+
+    doc = alloy_change_collection.find_one(
+        {"campaignId": campaign_id}
+    )
+
+    return dumps(doc)
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
