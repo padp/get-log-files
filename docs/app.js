@@ -342,7 +342,7 @@ document
   });
 
 function showCampaign(index) {
-
+  console.log(campaigns);
   const campaign = campaigns[index];
 
   if (!campaign)
