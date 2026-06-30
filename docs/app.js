@@ -21,8 +21,22 @@ async function loadData() {
 
     jsonData = JSON.parse(text);
 
-    renderKeys();
-    updateDashboard();
+
+    console.log("JSON loaded:", jsonData.length);
+
+    try {
+      renderKeys();
+      console.log("renderKeys OK");
+    } catch (e) {
+      console.error("renderKeys failed", e);
+    }
+
+    try {
+      updateDashboard();
+      console.log("updateDashboard OK");
+    } catch (e) {
+      console.error("updateDashboard failed", e);
+    }
 
   } catch (err) {
     console.error("Load error:", err);
@@ -33,8 +47,21 @@ async function loadData() {
 //--------------------------------------------------
 function getSortedEntries() {
   return [...jsonData].sort((a, b) =>
-    new Date(b.timeMoved.$date) - new Date(a.timeMoved.$date)
+    new Date(getDate(b.timeMoved)) - new Date(getDate(a.timeMoved))
   );
+}
+
+function getDate(value) {
+
+  if (!value) return new Date(0);
+
+  if (typeof value === "string")
+    return new Date(value);
+
+  if (value.$date)
+    return new Date(value.$date);
+
+  return new Date(value);
 }
 
 //--------------------------------------------------
@@ -61,7 +88,7 @@ function renderKeys() {
           ${row._id}
         </div>
         <div style="color:#666;font-size:12px;">
-          ${new Date(row.timeMoved.$date).toLocaleString()}
+          ${new Date(getDate(row.timeMoved)).toLocaleString()}
         </div>
       `;
 
@@ -84,9 +111,9 @@ function getCurrentShiftStart() {
 
   const now = new Date();
 
-  const s1 = new Date(now); s1.setHours(7,0,0,0);
-  const s2 = new Date(now); s2.setHours(15,0,0,0);
-  const s3 = new Date(now); s3.setHours(23,0,0,0);
+  const s1 = new Date(now); s1.setHours(7, 0, 0, 0);
+  const s2 = new Date(now); s2.setHours(15, 0, 0, 0);
+  const s3 = new Date(now); s3.setHours(23, 0, 0, 0);
 
   if (now >= s3) return s3;
   if (now >= s2) return s2;
@@ -94,7 +121,7 @@ function getCurrentShiftStart() {
 
   const y = new Date(now);
   y.setDate(y.getDate() - 1);
-  y.setHours(23,0,0,0);
+  y.setHours(23, 0, 0, 0);
 
   return y;
 }
@@ -107,34 +134,34 @@ function updateDashboard() {
   const entries = getSortedEntries();
   const shiftStart = getCurrentShiftStart();
 
-const logLength = (data) => {
-  try {
-    console.log("entry");
-    if (!data || !Array.isArray(data.history) || data.history.length === 0) {
-      console.log("if statement sent blank");
+  const logLength = (data) => {
+    try {
+      console.log("entry");
+      if (!data || !Array.isArray(data.history) || data.history.length === 0) {
+        console.log("if statement sent blank");
+        return "";
+      }
+
+      const startWeight = data.startWeight;
+      console.log(startWeight);
+      if (!startWeight) {
+        return "";
+      }
+
+      const calculatedLength = startWeight / 4.9375;
+
+      const shortLengthTest = Math.abs(216 - calculatedLength);
+      const longLengthTest = Math.abs(240 - calculatedLength);
+
+      return shortLengthTest > longLengthTest ? 240 : 216;
+
+    } catch (e) {
       return "";
     }
-
-    const startWeight = data.startWeight;
-    console.log(startWeight);
-    if (!startWeight) {
-      return "";
-    }
-
-    const calculatedLength = startWeight / 4.9375;
-
-    const shortLengthTest = Math.abs(216 - calculatedLength);
-    const longLengthTest = Math.abs(240 - calculatedLength);
-
-    return shortLengthTest > longLengthTest ? 240 : 216;
-
-  } catch (e) {
-    return "";
-  }
-};
+  };
 
   const shiftCount = entries.filter(v =>
-    new Date(v.timeMoved.$date) >= shiftStart
+    new Date(getDate(v.timeMoved)) >= shiftStart
   ).length;
 
   document.getElementById("shiftCount").textContent =
@@ -161,7 +188,7 @@ const logLength = (data) => {
       &nbsp;&nbsp;
       ${`${logLength(v, v.PartNo)} Inches`}
       <span style="float:right;color:#666;">
-        ${new Date(v.timeMoved.$date).toLocaleTimeString()}
+        ${new Date(getDate(v.timeMoved)).toLocaleTimeString()}
       </span>
     `;
 
@@ -243,7 +270,7 @@ function showObject(obj) {
     <b>Heat:</b> ${obj.HeatNo || ""}<br>
     <b>Location:</b> ${obj.Location || ""}<br>
     <b>Quantity:</b> ${obj.Quantity || ""}<br>
-    <b>Time Moved:</b> ${new Date(obj.timeMoved.$date).toLocaleString()}
+    <b>Time Moved:</b> ${new Date(getDate(obj.timeMoved)).toLocaleString()}
   `;
 
   document.getElementById("rawJson").textContent =
