@@ -1,5 +1,52 @@
 import { getSortedEntries } from "./state.js";
 import { getDate } from "./dateUtils.js";
+import { getId } from "./bsonUtils.js";
+
+const WEIGHT_PER_INCH = 4.9375; // startWeight ~= length_in * WEIGHT_PER_INCH
+const NONSENSE_TOLERANCE = 0.12; // how far (relatively) a weight may sit from both 216" and 240" before it's untrustworthy
+
+function nearestLength(weight) {
+  const length = weight / WEIGHT_PER_INCH;
+  return Math.abs(length - 240) < Math.abs(length - 216) ? 240 : 216;
+}
+
+function isTrustworthy(weight) {
+  if (!weight) return false;
+
+  const length = weight / WEIGHT_PER_INCH;
+  const off216 = Math.abs(length - 216) / 216;
+  const off240 = Math.abs(length - 240) / 240;
+
+  return Math.min(off216, off240) <= NONSENSE_TOLERANCE;
+}
+
+// Groups entries by campaign and finds each campaign's majority length, so
+// entries with a missing/nonsensical startWeight can borrow it -- every
+// entry in a campaign shares the same PartNo, so they're physically the
+// same length.
+function buildCampaignMajorityLengths(entries) {
+  const trustworthyByCampaign = new Map();
+
+  entries.forEach(v => {
+    const campaignId = v.campaign && getId(v.campaign._id);
+    if (!campaignId || !isTrustworthy(v.startWeight)) return;
+
+    const lengths = trustworthyByCampaign.get(campaignId) || [];
+    lengths.push(nearestLength(v.startWeight));
+    trustworthyByCampaign.set(campaignId, lengths);
+  });
+
+  const majorityByCampaign = new Map();
+
+  trustworthyByCampaign.forEach((lengths, campaignId) => {
+    const counts = new Map();
+    lengths.forEach(l => counts.set(l, (counts.get(l) || 0) + 1));
+    const majority = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    majorityByCampaign.set(campaignId, majority);
+  });
+
+  return majorityByCampaign;
+}
 
 function getCurrentShiftStart() {
   const now = new Date();
@@ -19,7 +66,7 @@ function getCurrentShiftStart() {
   return y;
 }
 
-function logLength(data) {
+function logLength(data, majorityByCampaign) {
   try {
     if (!data || !Array.isArray(data.history) || data.history.length === 0) {
       return "";
@@ -30,12 +77,14 @@ function logLength(data) {
       return "";
     }
 
-    const calculatedLength = startWeight / 4.9375;
+    if (isTrustworthy(startWeight)) {
+      return nearestLength(startWeight);
+    }
 
-    const shortLengthTest = Math.abs(216 - calculatedLength);
-    const longLengthTest = Math.abs(240 - calculatedLength);
+    const campaignId = data.campaign && getId(data.campaign._id);
+    const majority = campaignId && majorityByCampaign.get(campaignId);
 
-    return shortLengthTest > longLengthTest ? 240 : 216;
+    return majority || nearestLength(startWeight);
   } catch (e) {
     return "";
   }
@@ -44,6 +93,7 @@ function logLength(data) {
 export function updateDashboard() {
   const entries = getSortedEntries();
   const shiftStart = getCurrentShiftStart();
+  const majorityByCampaign = buildCampaignMajorityLengths(entries);
 
   const shiftCount = entries.filter(
     v => new Date(getDate(v.timeMoved)) >= shiftStart
@@ -69,7 +119,7 @@ export function updateDashboard() {
       &nbsp;&nbsp;
       ${v.PartNo || ""}
       &nbsp;&nbsp;
-      ${`${logLength(v)} Inches`}
+      ${`${logLength(v, majorityByCampaign)} Inches`}
       <span style="float:right;color:#666;">
         ${new Date(getDate(v.timeMoved)).toLocaleTimeString()}
       </span>
