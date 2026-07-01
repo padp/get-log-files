@@ -8,47 +8,54 @@
   </head>
 
   <body>
+    <header class="app-header">
+      <span class="app-header-title">UACJ Paducah</span>
+      <span class="app-header-subtitle">Log Load Tracker</span>
+    </header>
+
     <nav class="mobile-nav">
-      <button data-panel="list" class="active">List</button>
-      <button data-panel="dashboard">Dashboard</button>
-      <button data-panel="campaigns">Campaigns</button>
+      <button data-panel="list" class="active"><span>List</span></button>
+      <button data-panel="dashboard"><span>Dashboard</span></button>
+      <button data-panel="campaigns"><span>Campaigns</span></button>
     </nav>
 
-    <div id="left" class="active-panel">
-      <input type="text" id="search" placeholder="Search..." />
-      <div id="keyList"></div>
-    </div>
-
-    <div id="right">
-      <div class="metric-card">
-        <h2 id="shiftCount">Logs This Shift: 0</h2>
+    <div class="panels">
+      <div id="left" class="active-panel">
+        <input type="text" id="search" placeholder="Search..." />
+        <div id="keyList"></div>
       </div>
 
-      <div class="metric-card">
-        <h3>Log Details</h3>
-        <div id="recentLogs"></div>
+      <div id="right">
+        <div class="metric-card metric-highlight">
+          <h2 id="shiftCount">Logs This Shift: 0</h2>
+        </div>
+
+        <div class="metric-card">
+          <h3>Log Details</h3>
+          <div id="recentLogs"></div>
+        </div>
+
+        <div class="metric-card">
+          <h3>Selected Record</h3>
+          <div id="recordSummary">Select a record...</div>
+        </div>
+
+        <details>
+          <summary>Raw JSON</summary>
+          <pre id="rawJson"></pre>
+        </details>
       </div>
 
-      <div class="metric-card">
-        <h3>Selected Record</h3>
-        <div id="recordSummary">Select a record...</div>
-      </div>
+      <div id="rightmost">
+        <div class="metric-card">
+          <h3>Alloy Change History</h3>
 
-      <details>
-        <summary>Raw JSON</summary>
-        <pre id="rawJson"></pre>
-      </details>
-    </div>
+          <select id="campaignSelect"></select>
 
-    <div id="rightmost">
-      <div class="metric-card">
-        <h3>Alloy Change History</h3>
+          <div id="campaignSummary"></div>
 
-        <select id="campaignSelect"></select>
-
-        <div id="campaignSummary"></div>
-
-        <div id="campaignLogs"></div>
+          <div id="campaignLogs"></div>
+        </div>
       </div>
     </div>
 

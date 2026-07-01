@@ -118,23 +118,17 @@ function buildLogRow(v) {
   const row = document.createElement("div");
   row.className = "log-row";
   row.dataset.id = v._id;
-  row.style.padding = "6px";
-  row.style.borderBottom = "1px solid #eee";
 
   const header = document.createElement("div");
   header.className = "log-row-header";
   row.appendChild(header);
 
   const select = document.createElement("select");
-  select.style.width = "100%";
-  select.style.marginTop = "4px";
-  select.style.padding = "4px";
+  select.className = "log-row-select";
   populateHistoryOptions(select, v.history);
 
   const detail = document.createElement("div");
-  detail.style.fontSize = "12px";
-  detail.style.color = "#444";
-  detail.style.marginTop = "4px";
+  detail.className = "log-row-detail";
 
   select.addEventListener("change", (e) => {
     if (!e.target.value) {
@@ -172,7 +166,7 @@ function updateLogRow(row, v, majorityByCampaign) {
     ${v.PartNo || ""}
     &nbsp;&nbsp;
     ${`${logLength(v, majorityByCampaign)} Inches`}
-    <span style="float:right;color:#666;">
+    <span class="log-row-time">
       ${new Date(getDate(v.timeMoved)).toLocaleTimeString()}
     </span>
   `;

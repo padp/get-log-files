@@ -34,12 +34,8 @@ export function renderKeys() {
     }
 
     const html = `
-      <div style="font-weight:bold;font-size:14px;">
-        ${row._id}
-      </div>
-      <div style="color:#666;font-size:12px;">
-        ${new Date(getDate(row.timeMoved)).toLocaleString()}
-      </div>
+      <div class="item-title">${row._id}</div>
+      <div class="item-meta">${new Date(getDate(row.timeMoved)).toLocaleString()}</div>
     `;
 
     if (div.innerHTML !== html) div.innerHTML = html;
