@@ -6,13 +6,14 @@ import { fetchCampaignDetails } from "./api.js";
 export function renderCampaigns() {
   const select = document.getElementById("campaignSelect");
 
-  select.innerHTML = "";
-
   if (!state.campaigns.length) {
     select.innerHTML = "<option>No campaigns found</option>";
     return;
   }
 
+  const previousId = state.selectedCampaignId;
+
+  select.innerHTML = "";
   state.campaigns.forEach((campaign, index) => {
     const option = document.createElement("option");
 
@@ -26,7 +27,23 @@ export function renderCampaigns() {
     select.appendChild(option);
   });
 
-  showCampaign(0);
+  const previousIndex = previousId
+    ? state.campaigns.findIndex(c => getId(c._id) === previousId)
+    : -1;
+
+  const index = previousIndex >= 0 ? previousIndex : 0;
+  select.value = index;
+
+  const selectionChanged = previousIndex < 0;
+  const selectedCampaign = state.campaigns[index];
+
+  // Re-fetch/re-render the detail panel when the selection actually changed,
+  // or when the still-selected campaign is the active one (its stats keep
+  // changing as new logs come in). A completed campaign's numbers are final,
+  // so background refreshes leave the panel alone instead of flashing it.
+  if (selectionChanged || selectedCampaign.active) {
+    showCampaign(index);
+  }
 }
 
 export async function showCampaign(index) {
@@ -34,7 +51,11 @@ export async function showCampaign(index) {
 
   if (!campaign) return;
 
-  document.getElementById("campaignSummary").innerHTML = `
+  const campaignId = getId(campaign._id);
+  const isNewSelection = state.selectedCampaignId !== campaignId;
+  state.selectedCampaignId = campaignId;
+
+  const summaryHtml = `
         <b>Plex Part:</b> ${campaign.plexPart}<br>
         <b>Alloy Code:</b> ${campaign.alloyCode}<br>
         <b>Started:</b> ${new Date(getDate(campaign.startedAt)).toLocaleString()}<br>
@@ -45,19 +66,33 @@ export async function showCampaign(index) {
         <b>Status:</b> ${campaign.active ? "Active" : "Complete"}
     `;
 
+  const summaryEl = document.getElementById("campaignSummary");
+  if (summaryEl.innerHTML !== summaryHtml) summaryEl.innerHTML = summaryHtml;
+
   const logsEl = document.getElementById("campaignLogs");
-  logsEl.innerHTML = "<i>Loading details...</i>";
+
+  // Only show the interim loading state when switching to a campaign we
+  // haven't already displayed -- a background refresh of the same campaign
+  // should silently swap in new numbers, not flash blank first.
+  if (isNewSelection) {
+    logsEl.innerHTML = "<i>Loading details...</i>";
+  }
 
   try {
-    const { stats } = await fetchCampaignDetails(getId(campaign._id));
+    const { stats } = await fetchCampaignDetails(campaignId);
 
-    logsEl.innerHTML = `
+    const html = `
       <b>Logs Run:</b> ${stats.logCount}<br>
       <b>Cumulative Length:</b> ${stats.totalLength.toLocaleString()} in<br>
       <b>Total Weight:</b> ${stats.totalWeight.toLocaleString()} lbs
     `;
+
+    if (logsEl.innerHTML !== html) logsEl.innerHTML = html;
   } catch (err) {
     console.error("Campaign details failed:", err);
-    logsEl.innerHTML = "<i>Failed to load campaign details.</i>";
+
+    if (isNewSelection) {
+      logsEl.innerHTML = "<i>Failed to load campaign details.</i>";
+    }
   }
 }

@@ -3,7 +3,8 @@ import { getDate } from "./dateUtils.js";
 export const state = {
   jsonData: [],
   campaigns: [],
-  selectedDiv: null,
+  selectedId: null,
+  selectedCampaignId: null,
 };
 
 export function getSortedEntries() {

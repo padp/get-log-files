@@ -90,6 +90,103 @@ function logLength(data, majorityByCampaign) {
   }
 }
 
+function populateHistoryOptions(select, history) {
+  select.innerHTML = "";
+
+  const defaultOption = document.createElement("option");
+  defaultOption.text = "View History...";
+  defaultOption.value = "";
+  select.appendChild(defaultOption);
+
+  if (Array.isArray(history)) {
+    history.forEach(h => {
+      const opt = document.createElement("option");
+
+      const name = `${h.FirstName || ""} ${h.LastName || ""}`.trim();
+      const action = h.LastAction || "";
+      const loc = h.Location || "";
+
+      opt.text = `${name} | ${action} | ${loc}`;
+      opt.value = JSON.stringify(h);
+
+      select.appendChild(opt);
+    });
+  }
+}
+
+function buildLogRow(v) {
+  const row = document.createElement("div");
+  row.className = "log-row";
+  row.dataset.id = v._id;
+  row.style.padding = "6px";
+  row.style.borderBottom = "1px solid #eee";
+
+  const header = document.createElement("div");
+  header.className = "log-row-header";
+  row.appendChild(header);
+
+  const select = document.createElement("select");
+  select.style.width = "100%";
+  select.style.marginTop = "4px";
+  select.style.padding = "4px";
+  populateHistoryOptions(select, v.history);
+
+  const detail = document.createElement("div");
+  detail.style.fontSize = "12px";
+  detail.style.color = "#444";
+  detail.style.marginTop = "4px";
+
+  select.addEventListener("change", (e) => {
+    if (!e.target.value) {
+      detail.innerHTML = "";
+      return;
+    }
+
+    const h = JSON.parse(e.target.value);
+
+    detail.innerHTML = `
+      <b>User:</b> ${h.FirstName || ""} ${h.LastName || ""}<br>
+      <b>Action:</b> ${h.LastAction || ""}<br>
+      <b>Location:</b> ${h.Location || ""}<br>
+      <b>Update:</b> ${h.UpdateDate || ""}<br>
+      <b>Change:</b> ${h.ChangeDate || ""}
+    `;
+  });
+
+  row.appendChild(select);
+  row.appendChild(detail);
+
+  return row;
+}
+
+// Updates an existing row's header text and, if the log's history actually
+// changed (e.g. the async backfill just populated it), its dropdown options.
+// The select/detail nodes are otherwise left untouched so an open dropdown
+// selection survives a background refresh.
+function updateLogRow(row, v, majorityByCampaign) {
+  const header = row.querySelector(".log-row-header");
+
+  const html = `
+    <b>${v.SerialNo || ""}</b>
+    &nbsp;&nbsp;
+    ${v.PartNo || ""}
+    &nbsp;&nbsp;
+    ${`${logLength(v, majorityByCampaign)} Inches`}
+    <span style="float:right;color:#666;">
+      ${new Date(getDate(v.timeMoved)).toLocaleTimeString()}
+    </span>
+  `;
+
+  if (header.innerHTML !== html) header.innerHTML = html;
+
+  const select = row.querySelector("select");
+  const historyCount = Array.isArray(v.history) ? v.history.length : 0;
+
+  if (select.options.length - 1 !== historyCount) {
+    populateHistoryOptions(select, v.history);
+  }
+}
+
 export function updateDashboard() {
   const entries = getSortedEntries();
   const shiftStart = getCurrentShiftStart();
@@ -99,92 +196,35 @@ export function updateDashboard() {
     v => new Date(getDate(v.timeMoved)) >= shiftStart
   ).length;
 
-  document.getElementById("shiftCount").textContent = `Logs This Shift: ${shiftCount}`;
+  const shiftCountEl = document.getElementById("shiftCount");
+  const shiftCountText = `Logs This Shift: ${shiftCount}`;
+  if (shiftCountEl.textContent !== shiftCountText) shiftCountEl.textContent = shiftCountText;
 
   const recent = document.getElementById("recentLogs");
-  recent.innerHTML = "";
+  const shiftEntries = entries.slice(0, shiftCount);
 
-  entries.slice(0, shiftCount).forEach(v => {
-    const row = document.createElement("div");
-    row.style.padding = "6px";
-    row.style.borderBottom = "1px solid #eee";
+  const existing = new Map();
+  recent.querySelectorAll(".log-row").forEach(el => existing.set(el.dataset.id, el));
 
-    // -----------------------------
-    // MAIN ROW HEADER
-    // -----------------------------
-    const header = document.createElement("div");
+  const seen = new Set();
 
-    header.innerHTML = `
-      <b>${v.SerialNo || ""}</b>
-      &nbsp;&nbsp;
-      ${v.PartNo || ""}
-      &nbsp;&nbsp;
-      ${`${logLength(v, majorityByCampaign)} Inches`}
-      <span style="float:right;color:#666;">
-        ${new Date(getDate(v.timeMoved)).toLocaleTimeString()}
-      </span>
-    `;
+  shiftEntries.forEach(v => {
+    seen.add(v._id);
 
-    // -----------------------------
-    // DROPDOWN (HISTORY)
-    // -----------------------------
-    const select = document.createElement("select");
-    select.style.width = "100%";
-    select.style.marginTop = "4px";
-    select.style.padding = "4px";
+    let row = existing.get(v._id);
 
-    const defaultOption = document.createElement("option");
-    defaultOption.text = "View History...";
-    defaultOption.value = "";
-    select.appendChild(defaultOption);
-
-    if (Array.isArray(v.history)) {
-      v.history.forEach(h => {
-        const opt = document.createElement("option");
-
-        const name = `${h.FirstName || ""} ${h.LastName || ""}`.trim();
-        const action = h.LastAction || "";
-        const loc = h.Location || "";
-
-        opt.text = `${name} | ${action} | ${loc}`;
-        opt.value = JSON.stringify(h);
-
-        select.appendChild(opt);
-      });
+    if (!row) {
+      row = buildLogRow(v);
     }
 
-    // -----------------------------
-    // OPTIONAL DETAIL VIEW
-    // -----------------------------
-    const detail = document.createElement("div");
-    detail.style.fontSize = "12px";
-    detail.style.color = "#444";
-    detail.style.marginTop = "4px";
+    updateLogRow(row, v, majorityByCampaign);
 
-    select.addEventListener("change", (e) => {
-      if (!e.target.value) {
-        detail.innerHTML = "";
-        return;
-      }
-
-      const h = JSON.parse(e.target.value);
-
-      detail.innerHTML = `
-        <b>User:</b> ${h.FirstName || ""} ${h.LastName || ""}<br>
-        <b>Action:</b> ${h.LastAction || ""}<br>
-        <b>Location:</b> ${h.Location || ""}<br>
-        <b>Update:</b> ${h.UpdateDate || ""}<br>
-        <b>Change:</b> ${h.ChangeDate || ""}
-      `;
-    });
-
-    // -----------------------------
-    // ASSEMBLE ROW
-    // -----------------------------
-    row.appendChild(header);
-    row.appendChild(select);
-    row.appendChild(detail);
-
+    // appendChild on an already-attached node moves it -- iterating entries
+    // in order keeps DOM order correct without recreating untouched rows.
     recent.appendChild(row);
+  });
+
+  existing.forEach((row, id) => {
+    if (!seen.has(id)) row.remove();
   });
 }
