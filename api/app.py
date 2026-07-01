@@ -11,7 +11,8 @@ app = Flask(__name__)
 CORS(
     app,
     origins=[
-        "https://padp.github.io"
+        "https://padp.github.io",
+        "http://localhost:8080"
     ]
 )
 
