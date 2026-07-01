@@ -1,18 +1,55 @@
 import requests
 from config import secrets
+from login import renew_credentials, load_credentials
+
+INFO_FILE = "../secret/infos.txt"
+LOGIN_SECRETS_PATH = "../secret/login_infos.txt"
+
+_login_secrets = load_credentials(LOGIN_SECRETS_PATH)
 
 session = requests.Session()
 
-session.cookies.update({
-    "plex-customercode": "Whitehall-KY",
-    "plex-languageculturecode": "en-US",
-    "apt.uid": secrets["UID"],
-    "plex-auth-prod": secrets["AUTH_PROD"],
-    "apt.sid": secrets["SID"],
-})
+
+def _apply_cookies(creds):
+    session.cookies.update({
+        "plex-customercode": "Whitehall-KY",
+        "plex-languageculturecode": "en-US",
+        "plex-auth-prod": creds["AUTH_PROD"],
+    })
+
+
+_apply_cookies(secrets)
+
+
+def _reauth():
+    """Log in fresh, overwrite infos.txt, and pick up the new ASID/AUTH_PROD."""
+    global secrets
+    secrets = renew_credentials(
+        secrets_path=INFO_FILE,
+        username=_login_secrets["username"],
+        password=_login_secrets["password"],
+        company_code=_login_secrets["company_code"],
+    )
+    _apply_cookies(secrets)
+
+
+def _post(url, params, json, timeout=15):
+    """POST with a single retry: re-login once if the session has expired (401/403/419)."""
+    resp = session.post(url, params=params, json=json, timeout=timeout)
+
+    if resp.status_code in (401, 403, 419):
+        _reauth()
+        resp = session.post(url, params={**params, "__asid": secrets["ASID"]}, json=json, timeout=timeout)
+
+    if resp.status_code in (401, 403, 419):
+        raise PermissionError("Session expired and re-login failed")
+
+    resp.raise_for_status()
+    return resp
+
 
 def get_inventory_rows():
-    resp = session.post(
+    resp = _post(
         "https://cloud.plex.com/Inventory/InventoryByLocation/Search",
         params={
             "__asid": secrets["ASID"],
@@ -25,17 +62,12 @@ def get_inventory_rows():
             "BuildingKey": "5208",
             "PCN": 0
         },
-        timeout=15
     )
-
-    if resp.status_code in (401, 403):
-        raise PermissionError("Session expired")
-
-    resp.raise_for_status()
     return resp.json().get("Data", {}).get("Rows", [])
 
+
 def get_container_history(serial_no):
-    resp = session.post(
+    resp = _post(
         "https://cloud.plex.com/Inventory/ContainerHistory/SearchContainerHistory2",
         params={
             "__asid": secrets["ASID"],
@@ -47,11 +79,5 @@ def get_container_history(serial_no):
             "PlexusCustomerNo": 0,
             "SerialNo": serial_no
         },
-        timeout=15
     )
-
-    if resp.status_code in (401, 403):
-        raise PermissionError("Session expired")
-
-    resp.raise_for_status()
     return resp.json().get("Data", {}).get("Rows", [])

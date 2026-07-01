@@ -57,3 +57,66 @@ pre {
   white-space: pre-wrap;
   word-wrap: break-word;
 }
+
+.mobile-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  body {
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .mobile-nav {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #fff;
+    border-bottom: 1px solid #ccc;
+  }
+
+  .mobile-nav button {
+    flex: 1;
+    padding: 14px;
+    border: none;
+    background: #f5f5f5;
+    font-size: 14px;
+  }
+
+  .mobile-nav button.active {
+    background: #dcecff;
+    font-weight: bold;
+  }
+
+  #left,
+  #right,
+  #rightmost {
+    display: none;
+    width: 100%;
+    box-sizing: border-box;
+    border: none;
+  }
+
+  #left.active-panel,
+  #right.active-panel,
+  #rightmost.active-panel {
+    display: block;
+  }
+
+  #search {
+    font-size: 16px; /* iOS zooms the page on focus if an input's font is smaller than this */
+    padding: 12px;
+  }
+
+  .item {
+    padding: 12px;
+  }
+
+  select {
+    font-size: 16px;
+    padding: 10px;
+  }
+}
