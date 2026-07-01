@@ -21,3 +21,4 @@ db = client["log_files"]
 inventory = db["log_files"]
 campaigns = db["campaigns"]
 history = db["history_logs"]  # optional but recommended
+billets = db["billet_log"]
