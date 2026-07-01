@@ -2,6 +2,7 @@ from flask import Flask, request
 from flask_cors import CORS
 from pymongo import MongoClient
 from bson.json_util import dumps
+from bson import ObjectId
 from datetime import datetime, timedelta
 import os
 
@@ -180,19 +181,7 @@ def calculate_length(weight):
 
 
 @app.route("/api/campaigns/<campaign_id>", methods=["GET"])
-def campaign(campaign_id):
-
-    doc = alloy_change_collection.find_one(
-        {"campaignId": campaign_id}
-    )
-
-    return dumps(doc)
-
-
-@app.route("/api/campaigns/<campaign_id>")
 def campaign_details(campaign_id):
-
-    from bson import ObjectId
 
     campaign = alloy_change_collection.find_one(
         {"_id": ObjectId(campaign_id)}
@@ -202,7 +191,6 @@ def campaign_details(campaign_id):
         return {"error": "Campaign not found"}, 404
 
     query = {
-        "campaign": campaign["plexPart"],
         "timeMoved": {
             "$gte": campaign["startedAt"]
         }
