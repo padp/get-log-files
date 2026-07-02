@@ -155,7 +155,7 @@ def login_and_get_credentials(username: str, password: str, company_code: str) -
  
  
 def load_credentials(secrets_path: str) -> dict:
-    """Read ASID/UID/AUTH_PROD/SID (one KEY=VALUE per line) from the secrets file."""
+    """Read KEY=VALUE (one per line) from the secrets file."""
     creds = {}
     with open(secrets_path) as f:
         for line in f:
@@ -168,12 +168,21 @@ def load_credentials(secrets_path: str) -> dict:
  
  
 def save_credentials(secrets_path: str, creds: dict) -> None:
-    """Overwrite the secrets file with fresh credentials. Preserves 0600 perms."""
+    """
+    Overwrite the secrets file with fresh credentials. Writes to a sibling
+    temp file and atomically replaces the target, so a crash mid-write can
+    never leave secrets_path partially written.
+    """
     import os
-    with open(secrets_path, "w") as f:
-        for key in ("ASID", "UID", "AUTH_PROD", "SID"):
-            f.write(f"{key}={creds[key]}\n")
-    os.chmod(secrets_path, 0o600)
+
+    tmp_path = f"{secrets_path}.tmp"
+
+    with open(tmp_path, "w") as f:
+        for key, value in creds.items():
+            f.write(f"{key}={value}\n")
+
+    os.chmod(tmp_path, 0o600)
+    os.replace(tmp_path, secrets_path)
  
  
 def renew_credentials(secrets_path: str, username: str, password: str, company_code: str) -> dict:
