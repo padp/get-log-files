@@ -161,7 +161,7 @@ def campaigns():
     docs = list(
         alloy_change_collection
         .find({})
-        .sort("started", -1)
+        .sort("startedAt", -1)
         .limit(limit)
     )
 

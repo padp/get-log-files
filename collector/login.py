@@ -239,5 +239,5 @@ if __name__ == "__main__":
         company_code=secrets["company_code"],
     )
     with open("../secret/infos.txt", "w") as wr:
-        wr.write(f"ASID={creds["ASID"]}\n")
-        wr.write(f"AUTH_PROD={creds["AUTH_PROD"]}\n")
+        wr.write(f"ASID={creds['ASID']}\n")
+        wr.write(f"AUTH_PROD={creds['AUTH_PROD']}\n")
