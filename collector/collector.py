@@ -7,6 +7,7 @@ from inventory import upsert_inventory
 from plex import get_inventory_rows
 from history import process_history_queue, backfill_start_weight
 from billet_log import record_billet_state
+from schedule_status import update_schedule_status
 
 
 def main():
@@ -24,6 +25,8 @@ def main():
             print(f"[STATUS] Campaign: {campaign['plexPart'] if campaign else 'none'}")
 
             record_billet_state()
+
+            update_schedule_status()
 
             rows = get_inventory_rows()
             print(f"[STATUS] Fetched {len(rows)} inventory rows")

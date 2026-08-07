@@ -8,3 +8,6 @@ __pycache__/
 
 # OS junk
 Thumbs.db
+
+# Internal press schedule files -- proprietary scheduling/operator data, never publish
+/press_schedules/

@@ -22,3 +22,4 @@ inventory = db["log_files"]
 campaigns = db["campaigns"]
 history = db["history_logs"]  # optional but recommended
 billets = db["billet_log"]
+schedule_status = db["schedule_status"]
