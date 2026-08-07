@@ -5,3 +5,6 @@ __pycache__/
 .claude/*
 /.claude/*
 *.claude/
+
+# OS junk
+Thumbs.db

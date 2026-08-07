@@ -32,6 +32,8 @@ lf_collection = db["log_files"]
 
 alloy_change_collection = db["campaigns"]
 
+billet_collection = db["billet_log"]
+
 # ============================================================
 # Helper: shift start logic (same as your JS)
 # ============================================================
@@ -133,6 +135,59 @@ def dashboard():
     return dumps({
         "shiftCount": shift_count,
         "recent": result["recent"]
+    })
+
+
+# ============================================================
+# API: scanner health
+# ============================================================
+
+# How long inventory can go with no new arrivals -- WHILE the press keeps
+# running billets -- before we flag a likely barcode-scanner dropout.
+# Tune this once there's a feel for what a normal gap looks like; it's the
+# one knob that trades false alarms against missed outages.
+SCANNER_GAP_THRESHOLD = timedelta(hours=1)
+
+
+@app.route("/api/scanner-health", methods=["GET"])
+def scanner_health():
+    """
+    log_files.timeMoved marks when a log was actually scanned into
+    PAD-Extrusion SHARED; billet_log marks when the press actually consumed
+    one. If the press keeps consuming billets while no new log has been
+    scanned in for a while, that's the signature of the scanner losing
+    connection -- production keeps going, but nothing new is being logged
+    as arrived, which is exactly what causes the inventory discrepancies
+    this project exists to catch.
+    """
+
+    last_log = lf_collection.find_one({}, sort=[("timeMoved", -1)])
+    last_billet = billet_collection.find_one({}, sort=[("recordedAt", -1)])
+
+    now = datetime.utcnow()
+    last_log_time = last_log["timeMoved"] if last_log else None
+    last_billet_time = last_billet["recordedAt"] if last_billet else None
+
+    gap = (now - last_log_time) if last_log_time else None
+
+    billets_since_last_log = 0
+    if last_log_time:
+        billets_since_last_log = billet_collection.count_documents({
+            "recordedAt": {"$gt": last_log_time}
+        })
+
+    press_running_during_gap = billets_since_last_log > 0
+
+    likely_issue = bool(
+        gap and gap > SCANNER_GAP_THRESHOLD and press_running_during_gap
+    )
+
+    return dumps({
+        "lastLogArrival": last_log_time,
+        "lastBilletActivity": last_billet_time,
+        "gapMinutes": round(gap.total_seconds() / 60, 1) if gap else None,
+        "billetsSinceLastLog": billets_since_last_log,
+        "likelyScannerIssue": likely_issue,
     })
 
 

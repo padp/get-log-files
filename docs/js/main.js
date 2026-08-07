@@ -4,6 +4,7 @@ import { getDate } from "./dateUtils.js";
 import { renderKeys } from "./renderList.js";
 import { updateDashboard } from "./renderDashboard.js";
 import { renderCampaigns, showCampaign } from "./renderCampaigns.js";
+import { updateScannerHealth } from "./renderScannerHealth.js";
 
 //--------------------------------------------------
 // Load data
@@ -24,6 +25,8 @@ async function loadData() {
     } catch (e) {
       console.error("updateDashboard failed", e);
     }
+
+    updateScannerHealth();
 
     const unsortedCampaigns = await fetchCampaigns();
 
