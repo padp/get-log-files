@@ -1,6 +1,7 @@
 import { state, getSortedEntries } from "./state.js";
 import { getDate } from "./dateUtils.js";
 import { showObject } from "./renderRecord.js";
+import { isFlaggedRemoval } from "./flagUtils.js";
 
 export function renderKeys() {
   const filter = document.getElementById("search").value.toLowerCase();
@@ -33,9 +34,14 @@ export function renderKeys() {
       };
     }
 
+    const flagHtml = isFlaggedRemoval(row)
+      ? `<div class="item-flag">&#9888; Moved without being run at the press</div>`
+      : "";
+
     const html = `
       <div class="item-title">${row._id}</div>
       <div class="item-meta">${new Date(getDate(row.timeMoved)).toLocaleString()}</div>
+      ${flagHtml}
     `;
 
     if (div.innerHTML !== html) div.innerHTML = html;

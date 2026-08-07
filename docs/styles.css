@@ -154,6 +154,22 @@ body {
   margin-top: 2px;
 }
 
+.item-flag {
+  color: var(--color-danger);
+  font-weight: 600;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.record-flag {
+  color: var(--color-danger);
+  font-weight: 600;
+  background: var(--color-danger-soft);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
 /* ------------------------------------------------------------ */
 /* Recent log rows (dashboard)                                    */
 /* ------------------------------------------------------------ */
