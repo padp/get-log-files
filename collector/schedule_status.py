@@ -42,17 +42,20 @@ def update_schedule_status():
     profile = snapshot.get("Profile")
     die_copy = snapshot.get("Die Copy")
     billet_number = snapshot.get("Billet Number (per Order)")
+    scheduled_billets = snapshot.get("Scheduled Billets")
 
     # Job Number (#) is deliberately NOT used here -- it's manual operator
     # input in the PLC/HMI and isn't reliably kept up to date. Profile/Die
-    # Copy reflect whatever die is actually physically mounted.
-    if not profile or die_copy is None or billet_number is None:
-        print(f"[SCHEDULE] Press snapshot missing Profile/Die Copy/Billet Number "
-              f"(got profile={profile!r}, dieCopy={die_copy!r}, billet={billet_number!r}) -- skipping")
+    # Copy/Billet Number/Scheduled Billets all reflect the press's actual
+    # live state and are trustworthy.
+    if not profile or die_copy is None or billet_number is None or scheduled_billets is None:
+        print(f"[SCHEDULE] Press snapshot missing Profile/Die Copy/Billet Number/Scheduled Billets "
+              f"(got profile={profile!r}, dieCopy={die_copy!r}, billet={billet_number!r}, "
+              f"scheduled={scheduled_billets!r}) -- skipping")
         return
 
     try:
-        prediction = predict_billets_until_alloy_change(profile, die_copy, billet_number)
+        prediction = predict_billets_until_alloy_change(profile, die_copy, billet_number, scheduled_billets)
     except Exception as e:
         print(f"[SCHEDULE] Failed to read press schedule: {e}")
         return

@@ -239,32 +239,39 @@ def _find_current_index(entries, current_profile, current_die_copy, now):
     return None  # ambiguous or no in-progress row -- skip rather than guess
 
 
-def predict_billets_until_alloy_change(current_profile, current_die_copy, current_billet_number, now=None):
+def predict_billets_until_alloy_change(
+    current_profile, current_die_copy, current_billet_number, current_scheduled_billets, now=None
+):
     """
     current_profile: the live "Profile" field from press_data (matches the
         workbook's Die #).
     current_die_copy: the live "Die Copy" field from press_data (matches
         the workbook's Suffix, when Suffix is actually filled in).
     current_billet_number: the live Billet Number (per Order) from
-        press_data -- how many billets have been run so far in that job.
+        press_data -- how many billets have been run so far in this run.
+    current_scheduled_billets: the live "Scheduled Billets" field from
+        press_data. Unlike Job Number, this (along with Profile/Die
+        Copy/Billet Number) is trustworthy -- but it can legitimately
+        exceed the current job's own Excel-scheduled amount when the
+        operator has informally consolidated one or more upcoming jobs
+        into this same continuous run without updating the spreadsheet.
+        When that happens, this attributes those jobs' Excel-scheduled
+        billets to the current run instead of counting them as separate
+        upcoming jobs, until the Excel total catches up to what the PLC
+        says is actually being run.
 
     Walks the schedule forward from the current job, summing scheduled
     billets for this job (minus what's already run) plus every subsequent
-    job, stopping only at the next explicit "ALLOY CHANGE" marker row.
-    Adjacent jobs can legitimately differ in alloy *text* without a real
-    alloy change (e.g. 6063T5 -> 6063T4 is a temper difference within the
-    same base alloy, confirmed against a real schedule with no marker
-    between them) -- the marker rows are the operators' own judgment call
-    on what counts as a boundary, and that's more trustworthy than a
-    string comparison across two systems (press_data's alloy codes vs.
-    the schedule's alloy/temper text) with no reliable mapping between
-    them. Crosses into the next shift's file if the current one runs out
-    first.
-
-    Note the "# blts" scheduled count itself can be stale (jobs sometimes
-    get informally consolidated on the floor -- e.g. two 75-billet jobs run
-    as one continuous 150 without the schedule being updated), so the
-    result is only ever as accurate as what's actually on the sheet.
+    non-consolidated job, stopping only at the next explicit "ALLOY CHANGE"
+    marker row. Adjacent jobs can legitimately differ in alloy *text*
+    without a real alloy change (e.g. 6063T5 -> 6063T4 is a temper
+    difference within the same base alloy, confirmed against a real
+    schedule with no marker between them) -- the marker rows are the
+    operators' own judgment call on what counts as a boundary, and that's
+    more trustworthy than a string comparison across two systems
+    (press_data's alloy codes vs. the schedule's alloy/temper text) with
+    no reliable mapping between them. Crosses into the next shift's file
+    if the current one runs out first.
     """
 
     # Shift boundaries and the workbook DATE cells are plant local time, not
@@ -285,10 +292,27 @@ def predict_billets_until_alloy_change(current_profile, current_die_copy, curren
         return None  # can't confidently identify the current job -- can't predict
 
     current_alloy = entries[current_index]["alloy"]
-    remaining_billets = max(entries[current_index]["scheduledBillets"] - current_billet_number, 0)
+
+    # Trust the PLC's own total for the current run over the (possibly
+    # stale, pre-consolidation) Excel figure for just this one job line.
+    remaining_billets = max(current_scheduled_billets - current_billet_number, 0)
     jobs_remaining = 0
 
     index = current_index + 1
+
+    # Any immediately-following job(s) whose Excel-scheduled billets are
+    # already covered by the PLC's larger total have been informally
+    # consolidated into this same run -- skip them here so the walk below
+    # doesn't double-count them as separate upcoming jobs.
+    consolidated_total = entries[current_index]["scheduledBillets"]
+    while (
+        index < len(entries)
+        and "job" in entries[index]
+        and consolidated_total < current_scheduled_billets
+    ):
+        consolidated_total += entries[index]["scheduledBillets"]
+        index += 1
+
     hops = 0
 
     while hops < 3:  # safety cap: don't chase across more than a few shifts
