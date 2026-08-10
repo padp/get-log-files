@@ -20,18 +20,19 @@ with "ALLOY CHANGE" is a boundary marker, not a job.
 """
 
 from datetime import datetime, timedelta
+import os
 import xlrd
 
-SCHEDULE_DIR = "Y:/PADUCAH - Press Schedules/PRESS REPORTS"
+# UNC path, not a drive letter -- "Y:" is a per-machine mapping that isn't
+# guaranteed to exist (confirmed: it doesn't on the collector's actual PC),
+# whereas this resolves the same way from any machine with network access
+# to the file server.
+SCHEDULE_DIR = "//lud-storage.whitehallindustries.com/PADUCAH - Press & Production/PADUCAH - Press Schedules/PRESS REPORTS"
 
-WEEKDAY_LETTERS = "ABCDEFG"  # Monday=A .. Sunday=G, matches the file naming convention
-
-# (ordinal name, filename suffix number) per shift, keyed by which shift a given hour falls in
 SHIFT_1ST = "1st"
 SHIFT_2ND = "2nd"
 SHIFT_3RD = "3rd"
 
-SHIFT_SUFFIX = {SHIFT_1ST: 2, SHIFT_2ND: 3, SHIFT_3RD: 1}
 SHIFT_ORDER = [SHIFT_1ST, SHIFT_2ND, SHIFT_3RD]  # chronological order within a shift-date
 
 COL_DIE = 0
@@ -76,13 +77,44 @@ def get_next_shift_info(shift_date, shift_name):
     return shift_date, SHIFT_ORDER[idx + 1]
 
 
-def shift_file_path(shift_date, shift_name):
-    letter = WEEKDAY_LETTERS[shift_date.weekday()]
-    suffix = SHIFT_SUFFIX[shift_name]
-    weekday_name = shift_date.strftime("%A")
+def find_shift_file(shift_date, shift_name):
+    """
+    Scans SCHEDULE_DIR for the workbook matching this shift, rather than
+    constructing an exact filename -- the Letter-Number prefix scheme
+    (e.g. "A-2 Press Report - ...") isn't fully reliable (confirmed: an
+    old templates folder had the same day/shift using a different number),
+    but every file we've seen still embeds the weekday name and shift
+    ordinal as plain text, which is what's matched on here instead.
+    Raises FileNotFoundError (same as a direct open would) if the
+    directory itself isn't reachable or nothing matches, so callers don't
+    need to handle a new failure mode.
+    """
 
-    filename = f"{letter}-{suffix} Press Report - {weekday_name} {shift_name} Shift.xls"
-    return f"{SCHEDULE_DIR}/{filename}"
+    weekday_name = shift_date.strftime("%A").lower()
+    shift_lower = shift_name.lower()
+
+    try:
+        all_files = os.listdir(SCHEDULE_DIR)
+    except OSError as e:
+        raise FileNotFoundError(f"Schedule directory not reachable: {SCHEDULE_DIR} ({e})") from e
+
+    candidates = sorted(
+        f for f in all_files
+        if f.lower().endswith(".xls")
+        and weekday_name in f.lower()
+        and shift_lower in f.lower()
+    )
+
+    if not candidates:
+        raise FileNotFoundError(
+            f"No schedule file found for {shift_date} {shift_name} shift in {SCHEDULE_DIR} "
+            f"(looked for a .xls file containing {weekday_name!r} and {shift_lower!r})"
+        )
+
+    # if more than one file matches (e.g. a stray "Copy of ..."), prefer the
+    # shortest name -- the plain, non-copy filename is virtually always shorter
+    candidates.sort(key=len)
+    return f"{SCHEDULE_DIR}/{candidates[0]}"
 
 
 def parse_schedule(path):
@@ -149,7 +181,7 @@ def predict_billets_until_alloy_change(current_job_number, current_billet_number
     now = now or datetime.now()
     shift_date, shift_name = get_shift_info(now)
 
-    entries = parse_schedule(shift_file_path(shift_date, shift_name))
+    entries = parse_schedule(find_shift_file(shift_date, shift_name))
 
     current_index = next(
         (i for i, e in enumerate(entries) if "job" in e and e["job"] == int(current_job_number)),
@@ -187,7 +219,7 @@ def predict_billets_until_alloy_change(current_job_number, current_billet_number
         shift_date, shift_name = get_next_shift_info(shift_date, shift_name)
 
         try:
-            entries = parse_schedule(shift_file_path(shift_date, shift_name))
+            entries = parse_schedule(find_shift_file(shift_date, shift_name))
         except FileNotFoundError:
             break
 
