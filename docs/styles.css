@@ -170,6 +170,13 @@ body {
   margin-bottom: 10px;
 }
 
+.schedule-stale {
+  color: var(--color-danger);
+  font-weight: 600;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
 /* ------------------------------------------------------------ */
 /* Recent log rows (dashboard)                                    */
 /* ------------------------------------------------------------ */

@@ -5,6 +5,7 @@ import { renderKeys } from "./renderList.js";
 import { updateDashboard } from "./renderDashboard.js";
 import { renderCampaigns, showCampaign } from "./renderCampaigns.js";
 import { updateScannerHealth } from "./renderScannerHealth.js";
+import { updateScheduleStatus } from "./renderScheduleStatus.js";
 
 //--------------------------------------------------
 // Load data
@@ -27,6 +28,7 @@ async function loadData() {
     }
 
     updateScannerHealth();
+    updateScheduleStatus();
 
     const unsortedCampaigns = await fetchCampaigns();
 

@@ -34,6 +34,8 @@ alloy_change_collection = db["campaigns"]
 
 billet_collection = db["billet_log"]
 
+schedule_status_collection = db["schedule_status"]
+
 # ============================================================
 # Helper: shift start logic (same as your JS)
 # ============================================================
@@ -189,6 +191,26 @@ def scanner_health():
         "billetsSinceLastLog": billets_since_last_log,
         "likelyScannerIssue": likely_issue,
     })
+
+
+# ============================================================
+# API: schedule status
+# ============================================================
+
+@app.route("/api/schedule-status", methods=["GET"])
+def schedule_status():
+    """
+    schedule_status.py computes this on the collector's PC (the only place
+    with the schedule share mounted) and upserts a single "current" doc --
+    this just reads it back for the frontend.
+    """
+
+    doc = schedule_status_collection.find_one({"_id": "current"})
+
+    if doc is None:
+        return {"error": "No schedule status available yet"}, 404
+
+    return dumps(doc)
 
 
 # ============================================================

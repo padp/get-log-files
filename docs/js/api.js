@@ -37,3 +37,20 @@ export async function fetchScannerHealth() {
 
   return JSON.parse(text);
 }
+
+export async function fetchScheduleStatus() {
+  const response = await fetch(`${API_BASE}/api/schedule-status`);
+
+  // 404 means the collector hasn't produced a status doc yet -- a normal,
+  // expected state (not deployed yet, or hasn't matched a job this cycle),
+  // not an error worth throwing over.
+  if (response.status === 404) return null;
+
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  return JSON.parse(text);
+}
