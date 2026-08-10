@@ -43,6 +43,9 @@ COL_ALLOY = 4
 COL_SCHEDULED_BILLETS = 5
 COL_BILLET_LENGTH = 9
 COL_BILLETS_RAN = 10
+COL_DIE_TEMP = 11
+COL_START_TIME = 12
+COL_STOP_TIME = 13
 
 
 def get_shift_info(dt):
@@ -148,17 +151,81 @@ def parse_schedule(path):
             "scheduledBillets": sheet.cell_value(row, COL_SCHEDULED_BILLETS),
             "billetLength": sheet.cell_value(row, COL_BILLET_LENGTH),
             "billetsRan": sheet.cell_value(row, COL_BILLETS_RAN),
+            "dieTemp": sheet.cell_value(row, COL_DIE_TEMP),
+            "startTime": sheet.cell_value(row, COL_START_TIME),
+            "stopTime": sheet.cell_value(row, COL_STOP_TIME),
         })
 
     return entries
 
 
-def predict_billets_until_alloy_change(current_job_number, current_billet_number, now=None):
+def _to_int(value):
+    """Safe numeric coercion for matching PLC fields against workbook cells --
+    either side can be an int, a float, a numeric string, or a blank string."""
+
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_filled(value):
+    return value not in (None, "", 0)
+
+
+def _find_current_index(entries, current_profile, current_die_copy):
     """
-    current_job_number: the live Job Number (#) from press_data, for the job
-        actually running right now.
-    current_billet_number: the live Billet Number (per Order) from press_data
-        -- how many billets have been run so far in that job.
+    Finds which job row is actually running right now. Job Number (#) isn't
+    used -- it's manual operator input in the PLC/HMI and isn't reliably
+    kept up to date. Profile+Die Copy (automatically reflecting whatever
+    die is physically mounted) is matched against the workbook's Die #.
+
+    Die # alone isn't always unique (the same die can run multiple jobs
+    back to back, sometimes with Suffix filled in to disambiguate,
+    sometimes not, and scheduled jobs are sometimes informally consolidated
+    on the operator floor without the schedule being updated to reflect
+    it). So: narrow by Suffix when it actually disambiguates, then break
+    any remaining tie using operator-entered progress -- a row with a
+    Start time but no Stop time is the one actually in progress right now,
+    even if earlier rows in the list look like they got skipped over. If
+    that still doesn't land on exactly one row, this returns None rather
+    than guess.
+    """
+
+    die_matches = [
+        i for i, e in enumerate(entries)
+        if "job" in e and _to_int(e["die"]) == current_profile
+    ]
+
+    if not die_matches:
+        return None
+
+    suffix_matches = [
+        i for i in die_matches
+        if _to_int(entries[i]["suffix"]) == current_die_copy
+    ]
+
+    candidates = suffix_matches or die_matches
+
+    in_progress = [
+        i for i in candidates
+        if _is_filled(entries[i]["startTime"]) and not _is_filled(entries[i]["stopTime"])
+    ]
+
+    if len(in_progress) == 1:
+        return in_progress[0]
+
+    return None  # ambiguous or no in-progress row -- skip rather than guess
+
+
+def predict_billets_until_alloy_change(current_profile, current_die_copy, current_billet_number, now=None):
+    """
+    current_profile: the live "Profile" field from press_data (matches the
+        workbook's Die #).
+    current_die_copy: the live "Die Copy" field from press_data (matches
+        the workbook's Suffix, when Suffix is actually filled in).
+    current_billet_number: the live Billet Number (per Order) from
+        press_data -- how many billets have been run so far in that job.
 
     Walks the schedule forward from the current job, summing scheduled
     billets for this job (minus what's already run) plus every subsequent
@@ -172,6 +239,11 @@ def predict_billets_until_alloy_change(current_job_number, current_billet_number
     the schedule's alloy/temper text) with no reliable mapping between
     them. Crosses into the next shift's file if the current one runs out
     first.
+
+    Note the "# blts" scheduled count itself can be stale (jobs sometimes
+    get informally consolidated on the floor -- e.g. two 75-billet jobs run
+    as one continuous 150 without the schedule being updated), so the
+    result is only ever as accurate as what's actually on the sheet.
     """
 
     # Shift boundaries and the workbook DATE cells are plant local time, not
@@ -183,13 +255,13 @@ def predict_billets_until_alloy_change(current_job_number, current_billet_number
 
     entries = parse_schedule(find_shift_file(shift_date, shift_name))
 
-    current_index = next(
-        (i for i, e in enumerate(entries) if "job" in e and e["job"] == int(current_job_number)),
-        None
-    )
+    current_profile = _to_int(current_profile)
+    current_die_copy = _to_int(current_die_copy)
+
+    current_index = _find_current_index(entries, current_profile, current_die_copy)
 
     if current_index is None:
-        return None  # current job isn't in this shift's schedule -- can't predict
+        return None  # can't confidently identify the current job -- can't predict
 
     current_alloy = entries[current_index]["alloy"]
     remaining_billets = max(entries[current_index]["scheduledBillets"] - current_billet_number, 0)

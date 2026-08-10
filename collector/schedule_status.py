@@ -39,28 +39,27 @@ def update_schedule_status():
         return
 
     snapshot = data[0]
-    job_number = snapshot.get("Job Number (#)")
+    profile = snapshot.get("Profile")
+    die_copy = snapshot.get("Die Copy")
     billet_number = snapshot.get("Billet Number (per Order)")
 
-    if not job_number or billet_number is None:
-        print(f"[SCHEDULE] Press snapshot missing Job Number/Billet Number "
-              f"(got job={job_number!r}, billet={billet_number!r}) -- skipping")
+    # Job Number (#) is deliberately NOT used here -- it's manual operator
+    # input in the PLC/HMI and isn't reliably kept up to date. Profile/Die
+    # Copy reflect whatever die is actually physically mounted.
+    if not profile or die_copy is None or billet_number is None:
+        print(f"[SCHEDULE] Press snapshot missing Profile/Die Copy/Billet Number "
+              f"(got profile={profile!r}, dieCopy={die_copy!r}, billet={billet_number!r}) -- skipping")
         return
 
     try:
-        job_number = int(job_number)
-    except (TypeError, ValueError):
-        print(f"[SCHEDULE] Job Number {job_number!r} isn't a valid integer -- skipping")
-        return
-
-    try:
-        prediction = predict_billets_until_alloy_change(job_number, billet_number)
+        prediction = predict_billets_until_alloy_change(profile, die_copy, billet_number)
     except Exception as e:
         print(f"[SCHEDULE] Failed to read press schedule: {e}")
         return
 
     if prediction is None:
-        print(f"[SCHEDULE] Job {job_number} not found in today's schedule -- skipping")
+        print(f"[SCHEDULE] Couldn't confidently match profile={profile!r} dieCopy={die_copy!r} "
+              f"to a single in-progress job in today's schedule -- skipping")
         return
 
     cadence = _estimate_cadence_seconds()
@@ -70,7 +69,8 @@ def update_schedule_status():
         {"_id": "current"},
         {
             "_id": "current",
-            "jobNumber": job_number,
+            "profile": profile,
+            "dieCopy": die_copy,
             "billetsRemaining": prediction["billetsRemaining"],
             "jobsRemaining": prediction["jobsRemaining"],
             "alloy": prediction["alloy"],
@@ -80,5 +80,5 @@ def update_schedule_status():
         upsert=True,
     )
 
-    print(f"[SCHEDULE] Job {job_number}: {prediction['billetsRemaining']} billets remaining "
+    print(f"[SCHEDULE] Profile {profile} (die copy {die_copy}): {prediction['billetsRemaining']} billets remaining "
           f"({prediction['jobsRemaining']} more jobs) until alloy change")
