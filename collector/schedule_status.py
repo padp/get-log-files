@@ -35,6 +35,7 @@ def update_schedule_status():
     data = get_press_state()
 
     if not data:
+        print("[SCHEDULE] No press snapshot available -- skipping")
         return
 
     snapshot = data[0]
@@ -42,11 +43,14 @@ def update_schedule_status():
     billet_number = snapshot.get("Billet Number (per Order)")
 
     if not job_number or billet_number is None:
+        print(f"[SCHEDULE] Press snapshot missing Job Number/Billet Number "
+              f"(got job={job_number!r}, billet={billet_number!r}) -- skipping")
         return
 
     try:
         job_number = int(job_number)
     except (TypeError, ValueError):
+        print(f"[SCHEDULE] Job Number {job_number!r} isn't a valid integer -- skipping")
         return
 
     try:
@@ -56,6 +60,7 @@ def update_schedule_status():
         return
 
     if prediction is None:
+        print(f"[SCHEDULE] Job {job_number} not found in today's schedule -- skipping")
         return
 
     cadence = _estimate_cadence_seconds()
@@ -74,3 +79,6 @@ def update_schedule_status():
         },
         upsert=True,
     )
+
+    print(f"[SCHEDULE] Job {job_number}: {prediction['billetsRemaining']} billets remaining "
+          f"({prediction['jobsRemaining']} more jobs) until alloy change")
