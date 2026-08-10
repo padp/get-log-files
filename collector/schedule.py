@@ -173,7 +173,25 @@ def _is_filled(value):
     return value not in (None, "", 0)
 
 
-def _find_current_index(entries, current_profile, current_die_copy):
+def _day_fraction(dt):
+    """Time-of-day as a 0-1 fraction, matching how Excel stores the Start/Stop cells."""
+    return (dt.hour * 3600 + dt.minute * 60 + dt.second) / 86400
+
+
+def _has_really_stopped(stop_time, now_fraction):
+    """
+    A Stop time only counts as real evidence of completion if it's already
+    in the past. Operators sometimes pencil in an optimistic stop time
+    ahead of time (e.g. "I'll be on this die the rest of my shift") before
+    the job has actually finished -- confirmed live: a Stop time ~50
+    minutes in the future on a job that was, per the operator, still
+    running. A future Stop time is a plan, not a fact.
+    """
+
+    return _is_filled(stop_time) and stop_time <= now_fraction
+
+
+def _find_current_index(entries, current_profile, current_die_copy, now):
     """
     Finds which job row is actually running right now. Job Number (#) isn't
     used -- it's manual operator input in the PLC/HMI and isn't reliably
@@ -186,10 +204,10 @@ def _find_current_index(entries, current_profile, current_die_copy):
     on the operator floor without the schedule being updated to reflect
     it). So: narrow by Suffix when it actually disambiguates, then break
     any remaining tie using operator-entered progress -- a row with a
-    Start time but no Stop time is the one actually in progress right now,
-    even if earlier rows in the list look like they got skipped over. If
-    that still doesn't land on exactly one row, this returns None rather
-    than guess.
+    Start time and no Stop time that's already passed is the one actually
+    in progress right now, even if earlier rows in the list look like they
+    got skipped over. If that still doesn't land on exactly one row, this
+    returns None rather than guess.
     """
 
     die_matches = [
@@ -207,9 +225,12 @@ def _find_current_index(entries, current_profile, current_die_copy):
 
     candidates = suffix_matches or die_matches
 
+    now_fraction = _day_fraction(now)
+
     in_progress = [
         i for i in candidates
-        if _is_filled(entries[i]["startTime"]) and not _is_filled(entries[i]["stopTime"])
+        if _is_filled(entries[i]["startTime"])
+        and not _has_really_stopped(entries[i]["stopTime"], now_fraction)
     ]
 
     if len(in_progress) == 1:
@@ -258,7 +279,7 @@ def predict_billets_until_alloy_change(current_profile, current_die_copy, curren
     current_profile = _to_int(current_profile)
     current_die_copy = _to_int(current_die_copy)
 
-    current_index = _find_current_index(entries, current_profile, current_die_copy)
+    current_index = _find_current_index(entries, current_profile, current_die_copy, now)
 
     if current_index is None:
         return None  # can't confidently identify the current job -- can't predict
