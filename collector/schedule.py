@@ -271,7 +271,10 @@ def predict_billets_until_alloy_change(
     more trustworthy than a string comparison across two systems
     (press_data's alloy codes vs. the schedule's alloy/temper text) with
     no reliable mapping between them. Crosses into the next shift's file
-    if the current one runs out first.
+    if the current one runs out first -- jobs that haven't started are
+    routinely re-listed across multiple shift files, so each Job # is
+    only ever counted once across the whole walk (confirmed live: the
+    current job itself was re-listed, blank, on the next shift's sheet).
     """
 
     # Shift boundaries and the workbook DATE cells are plant local time, not
@@ -298,6 +301,13 @@ def predict_billets_until_alloy_change(
     remaining_billets = max(current_scheduled_billets - current_billet_number, 0)
     jobs_remaining = 0
 
+    # Jobs that haven't started yet get re-listed across multiple shift
+    # files (confirmed live: a job still in progress on 1st shift was also
+    # listed, blank, on 2nd shift's file, presumably so the next shift's
+    # operator can see it's still queued). Each Job # is only ever counted
+    # once across the whole walk, however many times it's re-listed.
+    seen_jobs = {entries[current_index]["job"]}
+
     index = current_index + 1
 
     # Any immediately-following job(s) whose Excel-scheduled billets are
@@ -310,7 +320,10 @@ def predict_billets_until_alloy_change(
         and "job" in entries[index]
         and consolidated_total < current_scheduled_billets
     ):
-        consolidated_total += entries[index]["scheduledBillets"]
+        entry = entries[index]
+        if entry["job"] not in seen_jobs:
+            seen_jobs.add(entry["job"])
+            consolidated_total += entry["scheduledBillets"]
         index += 1
 
     hops = 0
@@ -326,8 +339,11 @@ def predict_billets_until_alloy_change(
                     "alloy": current_alloy,
                 }
 
-            remaining_billets += entry["scheduledBillets"]
-            jobs_remaining += 1
+            if entry["job"] not in seen_jobs:
+                seen_jobs.add(entry["job"])
+                remaining_billets += entry["scheduledBillets"]
+                jobs_remaining += 1
+
             index += 1
 
         # ran off the end of this shift's file without hitting a boundary --
