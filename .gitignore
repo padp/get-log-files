@@ -11,3 +11,10 @@ Thumbs.db
 
 # Internal press schedule files -- proprietary scheduling/operator data, never publish
 /press_schedules/
+
+# Camera snapshots -- internal facility images, never publish
+collector/camera_snapshots/
+
+# Local-testing-only secrets copy (this network share's layout differs from the
+# real collector PC's -- production secrets live outside the repo, at ../secret/)
+/secret/

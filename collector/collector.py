@@ -8,6 +8,7 @@ from plex import get_inventory_rows
 from history import process_history_queue, backfill_start_weight
 from billet_log import record_billet_state
 from schedule_status import update_schedule_status
+from camera import update_camera_snapshots
 
 
 def main():
@@ -27,6 +28,8 @@ def main():
             record_billet_state()
 
             update_schedule_status()
+
+            update_camera_snapshots()
 
             rows = get_inventory_rows()
             print(f"[STATUS] Fetched {len(rows)} inventory rows")
