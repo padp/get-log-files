@@ -14,6 +14,9 @@ Thumbs.db
 
 # Camera snapshots -- internal facility images, never publish
 collector/camera_snapshots/
+collector/camera_snapshots_annotated/
+collector/camera_snapshots_sample/
+/camera_snapshots/
 
 # Local-testing-only secrets copy (this network share's layout differs from the
 # real collector PC's -- production secrets live outside the repo, at ../secret/)

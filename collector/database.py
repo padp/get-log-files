@@ -23,3 +23,5 @@ campaigns = db["campaigns"]
 history = db["history_logs"]  # optional but recommended
 billets = db["billet_log"]
 schedule_status = db["schedule_status"]
+table_state = db["table_state"]
+table_events = db["table_events"]

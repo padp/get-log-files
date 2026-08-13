@@ -9,6 +9,7 @@ from history import process_history_queue, backfill_start_weight
 from billet_log import record_billet_state
 from schedule_status import update_schedule_status
 from camera import update_camera_snapshots
+from table_state import update_table_state
 
 
 def main():
@@ -29,7 +30,8 @@ def main():
 
             update_schedule_status()
 
-            update_camera_snapshots()
+            camera_result, annotated_path = update_camera_snapshots()
+            update_table_state(camera_result, annotated_path)
 
             rows = get_inventory_rows()
             print(f"[STATUS] Fetched {len(rows)} inventory rows")

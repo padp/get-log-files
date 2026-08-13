@@ -13,11 +13,28 @@ repo is pushed to a public GitHub Pages site.
 
 import os
 import time
+import cv2
 import requests
 from datetime import datetime, timedelta
+from log_count import count_logs, annotate
 
-SNAPSHOT_DIR = "camera_snapshots"
+# Anchored to this file's own location rather than a bare relative path --
+# a bare "camera_snapshots" resolves differently depending on whatever
+# directory the process happens to be launched from, which already caused
+# snapshots to split across two different locations in practice.
+SNAPSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "camera_snapshots")
+# Warped crop + detected peaks, saved alongside each raw snapshot under the
+# same filename -- lets the counting logic be audited frame-by-frame instead
+# of just trusting the printed count/confidence. Every cycle's annotated
+# image lands here initially, but most get deleted quickly by
+# table_state.py's reconciliation -- only ones that actually contributed to
+# a camera consensus or coincided with a confirmed count change get kept
+# (renamed with a reason/count/confidence tag) and get the longer
+# ANNOTATED_RETENTION_DAYS expiry below instead of being pruned on the next
+# cycle or two.
+ANNOTATED_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "camera_snapshots_annotated")
 RETENTION_DAYS = 7
+ANNOTATED_RETENTION_DAYS = 30
 
 _CREDENTIALS_PATH = "../secret/camera.txt"
 
@@ -115,17 +132,17 @@ def capture_snapshot():
     return path
 
 
-def prune_old_snapshots():
-    """Deletes snapshots older than RETENTION_DAYS so they don't pile up on disk."""
+def prune_old_snapshots(directory=SNAPSHOT_DIR, retention_days=RETENTION_DAYS):
+    """Deletes files older than retention_days so they don't pile up on disk."""
 
-    if not os.path.isdir(SNAPSHOT_DIR):
+    if not os.path.isdir(directory):
         return 0
 
-    cutoff = time.time() - RETENTION_DAYS * 86400
+    cutoff = time.time() - retention_days * 86400
     removed = 0
 
-    for fname in os.listdir(SNAPSHOT_DIR):
-        path = os.path.join(SNAPSHOT_DIR, fname)
+    for fname in os.listdir(directory):
+        path = os.path.join(directory, fname)
         if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
             os.remove(path)
             removed += 1
@@ -136,18 +153,46 @@ def prune_old_snapshots():
 def update_camera_snapshots():
     """Capture-and-prune, self-contained: logs and swallows its own failures
     (camera offline, network hiccup, bad credentials) so a camera problem
-    never takes down the rest of the collector loop."""
+    never takes down the rest of the collector loop. Returns
+    (CountResult, annotated_path) on success (so callers -- table_state.py's
+    reconciliation -- can reuse the count instead of re-running count_logs
+    on the same image, and can decide whether this cycle's annotated image
+    is worth keeping) or (None, None) on any failure.
+
+    Note ANNOTATED_DIR is deliberately NOT pruned here on the short
+    RETENTION_DAYS window -- table_state.py owns that image's lifecycle now
+    (delete quickly if unused, rename-and-keep with the longer
+    ANNOTATED_RETENTION_DAYS if it contributed to a consensus or change)."""
 
     try:
         path = capture_snapshot()
         print(f"[CAMERA] Saved {path}")
     except Exception as e:
         print(f"[CAMERA] Failed to capture snapshot: {e}")
-        return
+        return None, None
+
+    result, annotated_path = None, None
+    try:
+        img = cv2.imread(path)
+        result = count_logs(img)
+        line = f"[CAMERA] Log count: {result.count}  [confidence={result.confidence:.2f}]"
+        if result.advisory:
+            line += f"  ADVISORY: {result.advisory['reason']} (alt estimate={result.advisory['measured_estimate']})"
+        print(line)
+
+        os.makedirs(ANNOTATED_DIR, exist_ok=True)
+        annotated_path = os.path.join(ANNOTATED_DIR, os.path.basename(path))
+        cv2.imwrite(annotated_path, annotate(img, result))
+    except Exception as e:
+        print(f"[CAMERA] Failed to count logs: {e}")
+        result, annotated_path = None, None
 
     try:
-        removed = prune_old_snapshots()
+        removed = prune_old_snapshots(SNAPSHOT_DIR, RETENTION_DAYS)
+        removed += prune_old_snapshots(ANNOTATED_DIR, ANNOTATED_RETENTION_DAYS)
         if removed:
-            print(f"[CAMERA] Pruned {removed} snapshot(s) older than {RETENTION_DAYS} days")
+            print(f"[CAMERA] Pruned {removed} file(s) past retention")
     except Exception as e:
         print(f"[CAMERA] Failed to prune old snapshots: {e}")
+
+    return result, annotated_path
