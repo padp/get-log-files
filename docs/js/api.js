@@ -54,3 +54,19 @@ export async function fetchScheduleStatus() {
 
   return JSON.parse(text);
 }
+
+export async function fetchTableState() {
+  const response = await fetch(`${API_BASE}/api/table-state`);
+
+  // 404 means table_state.py hasn't reached a confirmed count yet (e.g. no
+  // camera consensus since the collector last started) -- normal, not an error.
+  if (response.status === 404) return null;
+
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  return JSON.parse(text);
+}

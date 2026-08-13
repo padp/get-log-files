@@ -36,6 +36,8 @@ billet_collection = db["billet_log"]
 
 schedule_status_collection = db["schedule_status"]
 
+table_state_collection = db["table_state"]
+
 # ============================================================
 # Helper: shift start logic (same as your JS)
 # ============================================================
@@ -211,6 +213,33 @@ def schedule_status():
         return {"error": "No schedule status available yet"}, 404
 
     return dumps(doc)
+
+
+# ============================================================
+# API: table state (log table count)
+# ============================================================
+
+@app.route("/api/table-state", methods=["GET"])
+def table_state():
+    """
+    table_state.py reconciles the camera count and the furnace PLC signal
+    into a single confirmed count on the collector's PC and upserts a single
+    "current" doc -- this just reads it back for the frontend, same pattern
+    as /api/schedule-status.
+    """
+
+    doc = table_state_collection.find_one({"_id": "current"})
+
+    if doc is None:
+        return {"error": "No table state available yet"}, 404
+
+    # recentCameraReadings/lastFurnaceSlots etc. are internal reconciliation
+    # bookkeeping (including local file paths on the collector PC) -- only
+    # the confirmed count and its freshness are meaningful to the frontend
+    return dumps({
+        "confirmedCount": doc.get("confirmedCount"),
+        "updatedAt": doc.get("updatedAt"),
+    })
 
 
 # ============================================================

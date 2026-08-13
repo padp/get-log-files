@@ -170,7 +170,8 @@ body {
   margin-bottom: 10px;
 }
 
-.schedule-stale {
+.schedule-stale,
+.stale-warning {
   color: var(--color-danger);
   font-weight: 600;
   font-size: 12px;
