@@ -3,7 +3,8 @@ beautifulsoup4
 pymongo
 dnspython
 xlrd
-opencv-python-headless
+opencv-python
 numpy
 scipy
 pylogix
+ultralytics

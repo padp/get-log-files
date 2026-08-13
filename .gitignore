@@ -18,6 +18,11 @@ collector/camera_snapshots_annotated/
 collector/camera_snapshots_sample/
 /camera_snapshots/
 
+# YOLO experiment -- contains real facility photos plus trained model
+# weights, same reasoning as camera_snapshots above; experiment tabled
+# 2026-08-13 but keeping the dir locally in case it's revisited
+collector/yolo_dataset/
+
 # Local-testing-only secrets copy (this network share's layout differs from the
 # real collector PC's -- production secrets live outside the repo, at ../secret/)
 /secret/

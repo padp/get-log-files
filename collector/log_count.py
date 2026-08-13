@@ -48,15 +48,19 @@ _DST = cv2.transform(_axis_aligned_dst.reshape(-1, 1, 2), _rot).reshape(-1, 2)
 
 _WARP_MATRIX = cv2.getPerspectiveTransform(_SRC, _DST)
 
-# Sampling band within the warped crop. Originally a fixed horizontal row
-# range (rows 130-230) kept high to stay above the foreground safety fence --
-# but the fence crosses the frame diagonally (its top edge is much higher on
-# the anchor/right side than on the left), so a horizontal band is really a
+# Two sampling bands within the warped crop, both run on every frame; when
+# they disagree on the count, _gap_consistency picks whichever one's final
+# peaks are more evenly spaced at the known pitch (see count_logs).
+#
+# Band 1 ("primary"): originally a fixed horizontal row range (rows
+# 130-230) kept high to stay above the foreground safety fence -- but the
+# fence crosses the frame diagonally (its top edge is much higher on the
+# anchor/right side than on the left), so a horizontal band is really a
 # compromise between staying clear of the fence on the right and staying
 # clear of the brightest door glare (which turned out to sit right at the
 # top of the hand-drawn box) on the left. The user hand-marked a band that
 # instead runs parallel to the fence's actual diagonal, on a shortened
-# `warp_log_region()` crop of 6.jpg (`_TILT_FIX...`/`6_warped_angledandshortened.jpg`,
+# `warp_log_region()` crop of 6.jpg (`6_warped_angledandshortened.jpg`,
 # 2026-08-12) -- extracted via Hough line detection on the two drawn black
 # boundary lines, both slope~0.966 (~44 deg). Validated against a 38-photo
 # hand-labeled set: mean abs error 0.68 vs 1.47 for the old horizontal band
@@ -64,10 +68,35 @@ _WARP_MATRIX = cv2.getPerspectiveTransform(_SRC, _DST)
 # known fixed pitch instead of re-deriving it per frame -- the horizontal
 # band produced corrupted anchor-side signal on some frames much more often
 # than the angled one does).
+#
+# Band 2 ("rail-anchored"): the primary band's region sometimes still
+# contains real background structure (a roof/wall panel and cross-brace
+# truss, confirmed on a live frame 2026-08-13 -- the user first suspected
+# the fence, and while that specific panel wasn't it, the same investigation
+# led here) that echoes the log pitch closely enough to fool peak detection
+# entirely -- all peaks landing on structure, missing the real pile. The
+# user hand-marked the fence's top rail edge directly on that live frame
+# (`logpusher_20260813_084801_review.jpg`) as a candidate new lower
+# boundary; fit via linear regression on the marked pixels: slope=0.9473,
+# intercept=211.5. Anchoring a band directly there eliminates that failure
+# but introduces a different one (noisier/fragmented signal on some frames,
+# `_MARGIN2` below pulls the band away from the rail to reduce that). Best
+# single-band result found: 45px margin, mean abs error 0.68 / 24/38 (63%)
+# exact on the labeled set (vs 18/38 for band 1 alone) -- but still fails
+# badly on a few frames band 1 handles fine, hence running both.
 _MARGIN = 25
-_BAND_SLOPE = 0.966
-_BAND_UPPER_INTERCEPT = -13.5
-_BAND_LOWER_INTERCEPT = 129.0
+
+_BAND1_SLOPE = 0.966
+_BAND1_UPPER_INTERCEPT = -13.5
+_BAND1_LOWER_INTERCEPT = 129.0
+
+_RAIL_SLOPE = 0.9473
+_RAIL_INTERCEPT = 211.5
+_BAND2_HEIGHT = 142
+_BAND2_MARGIN = 45
+_BAND2_SLOPE = _RAIL_SLOPE
+_BAND2_UPPER_INTERCEPT = _RAIL_INTERCEPT - _BAND2_HEIGHT - _BAND2_MARGIN
+_BAND2_LOWER_INTERCEPT = _RAIL_INTERCEPT - _BAND2_MARGIN
 
 # Average log-to-log pitch (px), from hand-marked ground truth on 6.jpg and
 # 10.jpg (72.4px and 74.25px respectively). This press exclusively runs one
@@ -84,7 +113,8 @@ _ENERGY_RATIO = 0.3  # fraction of in-band peak energy that still counts as "rea
 
 
 class CountResult:
-    def __init__(self, count, method, confidence, detrended, peaks, boundary_x=None, advisory=None):
+    def __init__(self, count, method, confidence, detrended, peaks, boundary_x=None,
+                 advisory=None, band="primary", bands_agreed=True):
         self.count = count
         self.method = method            # always "peak" -- see advisory below
         self.confidence = confidence    # 0-1
@@ -92,10 +122,12 @@ class CountResult:
         self.peaks = peaks
         self.boundary_x = boundary_x
         self.advisory = advisory        # dict or None -- see count_logs()
+        self.band = band                # "primary" or "secondary" -- which band this result came from
+        self.bands_agreed = bands_agreed
 
     def __repr__(self):
         flag = f", advisory={self.advisory['measured_estimate']}" if self.advisory else ""
-        return f"CountResult(count={self.count}, confidence={self.confidence:.2f}{flag})"
+        return f"CountResult(count={self.count}, confidence={self.confidence:.2f}, band={self.band!r}{flag})"
 
 
 def warp_log_region(img):
@@ -103,17 +135,16 @@ def warp_log_region(img):
     return cv2.warpPerspective(img, _WARP_MATRIX, (_WARP_WIDTH, _WARP_HEIGHT))
 
 
-def _detrended_profile(img):
+def _detrended_profile(img, slope, upper_intercept, lower_intercept):
     warped = warp_log_region(img)
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY).astype(float)
     h, w = gray.shape
 
-    # angled band parallel to the fence -- see _BAND_SLOPE comment above
     xs = np.arange(_MARGIN, w - _MARGIN)
     profile = np.empty(len(xs), dtype=float)
     for i, x in enumerate(xs):
-        y0 = max(0, int(round(_BAND_SLOPE * x + _BAND_UPPER_INTERCEPT)))
-        y1 = min(h, int(round(_BAND_SLOPE * x + _BAND_LOWER_INTERCEPT)))
+        y0 = max(0, int(round(slope * x + upper_intercept)))
+        y1 = min(h, int(round(slope * x + lower_intercept)))
         profile[i] = gray[y0:y1, x].mean() if y1 > y0 else 0.0
 
     trend = cv2.GaussianBlur(profile.reshape(1, -1), (0, 0), sigmaX=25).flatten()
@@ -162,23 +193,24 @@ def _find_pile_boundary(energy):
     return i + 1
 
 
-def count_logs(img):
-    """Return a CountResult for a raw camera frame. Count is always the
-    peak-detection result on the detrended brightness profile -- that's the
-    trustworthy path (validated against hand-marked ground truth).
+def _gap_consistency(peaks):
+    """Mean absolute deviation of a peak list's gaps from the known fixed
+    pitch -- lower means the final peaks are more evenly, plausibly spaced
+    (real log ridges), higher means noisier/more irregular (more likely
+    contaminated by background structure or a fragmented signal). Used to
+    arbitrate between the two bands when they disagree on the count."""
+    if len(peaks) < 2:
+        return float("inf")
+    gaps = np.diff(peaks)
+    return float(np.mean(np.abs(gaps - _PITCH)))
 
-    There's also a pixel-measurement cross-check (locate the pile/background
-    boundary via local signal energy, divide the occupied span by the known
-    average log pitch) that was originally wired up as an *overriding*
-    fallback for when peak-detection looked like it missed something. That
-    got demoted to advisory-only (2026-08-12) after a live frame showed the
-    energy-boundary check can't reliably tell a real missed log apart from
-    background structure (a roof beam/doorway) that happens to echo the same
-    ~73px pitch -- it silently turned a correct count of 6 into a wrong 7.
-    The logic is kept here, surfaced as `result.advisory` rather than acting
-    on it, in case a more robust version of the boundary check (or some
-    other distinguishing signal) makes it trustworthy enough to reinstate."""
-    detrended = _detrended_profile(img)
+
+def _analyze_band(img, slope, upper_intercept, lower_intercept):
+    """Runs the full single-band pipeline (detrend, peak-detect, merge,
+    trim, energy/boundary, advisory check) and returns a dict with
+    everything count_logs needs to build a CountResult or compare against
+    the other band."""
+    detrended = _detrended_profile(img, slope, upper_intercept, lower_intercept)
     peaks, _ = find_peaks(detrended, prominence=3, distance=15)
     peaks = _merge_close_peaks(peaks)
     peaks = _trim_to_pile(peaks)
@@ -192,7 +224,7 @@ def count_logs(img):
 
     # if the energy-based boundary sits well left of the leftmost claimed
     # peak, there's unclaimed signal the peak detector didn't count --
-    # flagged for review, not acted on (see docstring)
+    # flagged for review, not acted on (see count_logs docstring)
     missed_span = leftmost_peak - boundary_x
     advisory = None
     if missed_span > 0.5 * _PITCH:
@@ -205,7 +237,68 @@ def count_logs(img):
         }
         confidence = min(confidence, 0.3)
 
-    return CountResult(len(peaks), "peak", confidence, detrended, peaks, boundary_x, advisory)
+    return {
+        "count": len(peaks),
+        "detrended": detrended,
+        "peaks": peaks,
+        "boundary_x": boundary_x,
+        "advisory": advisory,
+        "confidence": confidence,
+    }
+
+
+def count_logs(img):
+    """Return a CountResult for a raw camera frame, from one of two
+    independent sampling bands within the same warped crop (2026-08-13).
+
+    Band 1 ("primary") runs parallel to the safety fence and was the sole
+    method through 2026-08-12 (0.68 mean abs error / 18/38 exact on the
+    38-photo labeled set). It sometimes samples real background structure
+    (a roof/wall panel, cross-brace truss) that coincidentally echoes the
+    log pitch closely enough to fool peak detection entirely on some
+    frames. Band 2 ("secondary") is anchored near the fence's top rail
+    (see `_BAND2_*` above) -- it avoids that specific failure but has its
+    own (different) noisy-frame failure mode.
+
+    Both run every time. If they agree on the count, that's a real
+    cross-check and confidence uses the normal capacity-based formula. If
+    they disagree, `_gap_consistency` picks whichever band's final peaks are
+    more evenly spaced at the known pitch, and confidence is capped at 0.75
+    -- disagreement between two independent methods is inherently less
+    certain, even once one is chosen, and 0.75 sits below the 0.85 bar
+    table_state.py requires for camera-consensus re-anchoring, so a
+    disagreeing frame can't drive that on its own.
+
+    There's also a pixel-measurement cross-check within each band (locate
+    the pile/background boundary via local signal energy, divide the
+    occupied span by the known average log pitch) that was originally wired
+    up as an *overriding* fallback for when peak-detection looked like it
+    missed something. That got demoted to advisory-only (2026-08-12) after
+    a live frame showed the energy-boundary check can't reliably tell a
+    real missed log apart from background structure that happens to echo
+    the same ~73px pitch -- it silently turned a correct count of 6 into a
+    wrong 7. The logic is kept here, surfaced as `result.advisory` rather
+    than acting on it, in case a more robust distinguishing signal makes it
+    trustworthy enough to reinstate."""
+    band1 = _analyze_band(img, _BAND1_SLOPE, _BAND1_UPPER_INTERCEPT, _BAND1_LOWER_INTERCEPT)
+    band2 = _analyze_band(img, _BAND2_SLOPE, _BAND2_UPPER_INTERCEPT, _BAND2_LOWER_INTERCEPT)
+
+    if band1["count"] == band2["count"]:
+        winner, name, agreed = band1, "primary", True
+    else:
+        c1 = _gap_consistency(band1["peaks"])
+        c2 = _gap_consistency(band2["peaks"])
+        if c2 < c1:
+            winner, name, agreed = band2, "secondary", False
+        else:
+            winner, name, agreed = band1, "primary", False
+
+    confidence = winner["confidence"] if agreed else min(winner["confidence"], 0.75)
+
+    return CountResult(
+        winner["count"], "peak", confidence, winner["detrended"], winner["peaks"],
+        winner["boundary_x"], winner["advisory"], band=name, bands_agreed=agreed,
+    )
 
 
 def annotate(img, result):
@@ -224,7 +317,8 @@ def annotate(img, result):
         x = int(result.advisory["boundary_x"]) + _MARGIN
         cv2.line(vis, (x, 0), (x, vis.shape[0]), (0, 165, 255), 2)
 
-    label = f"count={result.count}  confidence={result.confidence:.2f}"
+    agree_flag = "" if result.bands_agreed else "  (bands disagreed)"
+    label = f"count={result.count}  confidence={result.confidence:.2f}  band={result.band}{agree_flag}"
     cv2.putText(vis, label, (10, vis.shape[0] - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
     if result.advisory:
         adv_label = f"ADVISORY: alt estimate={result.advisory['measured_estimate']}"
@@ -299,7 +393,8 @@ if __name__ == "__main__":
             print(f"{path}: could not read")
             continue
         result = count_logs(img)
-        line = f"{path}: {result.count}  [confidence={result.confidence:.2f}]"
+        agree_flag = "" if result.bands_agreed else " DISAGREE"
+        line = f"{path}: {result.count}  [confidence={result.confidence:.2f} band={result.band}{agree_flag}]"
         if result.advisory:
             line += f"  ADVISORY: {result.advisory['reason']} (alt estimate={result.advisory['measured_estimate']})"
         print(line)

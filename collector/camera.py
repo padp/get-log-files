@@ -175,7 +175,8 @@ def update_camera_snapshots():
     try:
         img = cv2.imread(path)
         result = count_logs(img)
-        line = f"[CAMERA] Log count: {result.count}  [confidence={result.confidence:.2f}]"
+        agree_flag = "" if result.bands_agreed else " DISAGREE"
+        line = f"[CAMERA] Log count: {result.count}  [confidence={result.confidence:.2f} band={result.band}{agree_flag}]"
         if result.advisory:
             line += f"  ADVISORY: {result.advisory['reason']} (alt estimate={result.advisory['measured_estimate']})"
         print(line)

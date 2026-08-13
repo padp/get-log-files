@@ -48,6 +48,16 @@ _NEW_LOG_MIN_INDEX = 2
 # smaller-than-expected jump still registers
 _SUM_INCREASE_THRESHOLD = 165
 
+# Minimum time between accepted furnace-decrements. Found live (2026-08-13):
+# a single real load event's PLC values can cross our decrement threshold
+# gradually across two consecutive ~60s polls rather than in one clean jump,
+# which was double-counted as two separate decrements only 67s apart --
+# physically impossible given logs move to the queue every 15-30 min. This
+# cooldown is set well below that real cadence (leaves room for genuine
+# back-to-back loads) but well above a single poll cycle, so a same-event
+# double-trigger gets suppressed without risking missing a real one.
+_DECREMENT_COOLDOWN_SECONDS = 300
+
 
 def _get_state():
     doc = state_collection.find_one({"_id": _STATE_ID})
@@ -58,6 +68,7 @@ def _get_state():
         "confirmedCount": None,
         "lastFurnaceSum": None,
         "lastFurnaceSlots": None,
+        "lastDecrementAt": None,
         "recentCameraReadings": [],  # [{path, count, confidence, kept}]
     }
 
@@ -84,17 +95,30 @@ def _delete_photo(path):
         print(f"[TABLE] Failed to delete unused annotated photo {path}: {e}")
 
 
-def _tag_and_keep(entry, reason):
+def _tag_and_keep(entry, reason, confirmed_count=None):
     """Renames an annotated photo in place to mark why it was kept -- e.g.
     logpusher_20260813_071735.jpg -> logpusher_20260813_071735__consensus__count6__conf0.92.jpg
     -- so the user can filter the annotated directory by reason or count
-    later without opening every file."""
+    later without opening every file.
+
+    confirmed_count is only meaningful (and only passed) for the
+    furnace-decrement case: this photo's own camera reading (entry['count'])
+    is NOT the same thing as the confirmed table count that resulted from
+    the decrement -- it's just whatever the camera happened to see in that
+    one frame, which can differ a lot (found live 2026-08-13: a filename
+    read as "confirmed count dropped to 4" when it actually meant "the
+    camera misread this one frame as 4"). Spelling out both avoids that
+    confusion. For the consensus case entry['count'] already *is* the new
+    confirmed count, so there's nothing ambiguous to add."""
     if entry.get("kept") or not entry.get("path") or not os.path.exists(entry["path"]):
         return
 
     directory, fname = os.path.split(entry["path"])
     stem, ext = os.path.splitext(fname)
-    new_name = f"{stem}__{reason}__count{entry['count']}__conf{entry['confidence']:.2f}{ext}"
+    if confirmed_count is not None:
+        new_name = f"{stem}__{reason}__confirmed{confirmed_count}__cameraSaw{entry['count']}__conf{entry['confidence']:.2f}{ext}"
+    else:
+        new_name = f"{stem}__{reason}__count{entry['count']}__conf{entry['confidence']:.2f}{ext}"
     new_path = os.path.join(directory, new_name)
     try:
         os.rename(entry["path"], new_path)
@@ -122,9 +146,20 @@ def _apply_furnace_state(state, furnace):
     )
 
     if new_slot_filled or sum_increase > _SUM_INCREASE_THRESHOLD:
-        if state["confirmedCount"] is not None and state["confirmedCount"] > 0:
+        now = datetime.utcnow()
+        last = state.get("lastDecrementAt")
+        seconds_since_last = (now - last).total_seconds() if last else None
+
+        if seconds_since_last is not None and seconds_since_last < _DECREMENT_COOLDOWN_SECONDS:
+            # almost certainly the same real event crossing the threshold
+            # across two consecutive polls rather than a second real load --
+            # see _DECREMENT_COOLDOWN_SECONDS
+            print(f"[TABLE] Suppressed furnace decrement -- only {seconds_since_last:.0f}s since the last one "
+                  f"(cooldown is {_DECREMENT_COOLDOWN_SECONDS}s)")
+        elif state["confirmedCount"] is not None and state["confirmedCount"] > 0:
             old = state["confirmedCount"]
             state["confirmedCount"] = old - 1
+            state["lastDecrementAt"] = now
             detail = {"sumIncrease": sum_increase, "newSlotFilled": new_slot_filled, "slots": slots}
             _log_event("furnace_decrement", old, state["confirmedCount"], detail)
             print(f"[TABLE] Furnace decrement: {old} -> {state['confirmedCount']} ({detail})")
@@ -134,7 +169,20 @@ def _apply_furnace_state(state, furnace):
             # camera -- is what triggered it
             readings = state["recentCameraReadings"]
             if readings:
-                _tag_and_keep(readings[-1], "furnace-decrement")
+                _tag_and_keep(readings[-1], "furnace-decrement", confirmed_count=state["confirmedCount"])
+
+            # Reset the consensus window (2026-08-13, per the user): once a
+            # log is confirmed gone via the furnace, camera consensus should
+            # never be able to push the count back up using readings taken
+            # *before* the log actually left -- those still show the old,
+            # larger pile and would otherwise look like a legitimate
+            # "greater than current" consensus even though they're stale.
+            # Only fresh readings taken after this point should be able to
+            # count toward the next consensus.
+            for entry in readings:
+                if not entry.get("kept"):
+                    _delete_photo(entry.get("path"))
+            state["recentCameraReadings"] = []
 
     state["lastFurnaceSum"] = total
     state["lastFurnaceSlots"] = slots
@@ -168,14 +216,26 @@ def _apply_camera_result(state, camera_result, annotated_path):
 
     if len(counts) == 1 and min_confidence >= _CONSENSUS_MIN_CONFIDENCE:
         consensus = next(iter(counts))
-        if state["confirmedCount"] != consensus:
-            old = state["confirmedCount"]
+        old = state["confirmedCount"]
+
+        # Per the user (2026-08-13): once a strong consensus is established,
+        # the camera signal can only ever move the count *up* (a new
+        # delivery, which the furnace can't see) -- it should never be able
+        # to move it down. Decreases are the furnace's job exclusively,
+        # since that's the only unambiguous signal for a log actually
+        # leaving the table. A camera consensus below the current confirmed
+        # count is far more likely a misread (background bleed, low
+        # contrast) than a real decrease, and letting the furnace own all
+        # decreases avoids exactly that failure mode.
+        if old is None or consensus > old:
             state["confirmedCount"] = consensus
             _log_event("camera_consensus", old, consensus, {"readings": readings})
             print(f"[TABLE] Camera consensus: {old} -> {consensus}")
 
             for entry in readings:
                 _tag_and_keep(entry, "consensus")
+        elif consensus != old:
+            print(f"[TABLE] Camera consensus ({consensus}) is not greater than confirmed count ({old}) -- ignored, decreases are the furnace's job")
 
 
 def update_table_state(camera_result, annotated_path=None):
@@ -196,6 +256,7 @@ def update_table_state(camera_result, annotated_path=None):
     except Exception as e:
         print(f"[TABLE] Furnace read failed: {e}")
 
+    state["updatedAt"] = datetime.utcnow()
     _save_state(state)
 
     print(f"[TABLE] Confirmed count: {state['confirmedCount']}")
