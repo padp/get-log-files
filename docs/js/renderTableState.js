@@ -94,6 +94,18 @@ const REASON_LABEL = {
   furnace_decrement: "furnace", // shouldn't normally appear here (that reason only ever decreases), kept as a fallback label
 };
 
+function plexMatchHtml(ev) {
+  if (ev.plexMatchCount >= ev.delta) {
+    return `<span class="plex-match plex-match-ok">&#10003; matched in Plex (${ev.plexMatchCount})</span>`;
+  }
+
+  if (ev.plexMatchCount > 0) {
+    return `<span class="plex-match plex-match-partial">&#9888; only ${ev.plexMatchCount}/${ev.delta} matched in Plex</span>`;
+  }
+
+  return `<span class="plex-match plex-match-none">&#9888; no matching Plex scan found</span>`;
+}
+
 export async function updateLoadEvents() {
   const list = document.getElementById("loadEventsList");
 
@@ -115,6 +127,7 @@ export async function updateLoadEvents() {
           <span class="load-event-delta">+${ev.delta}</span>
           <b>${ev.newCount} on table</b> (${label})
           <div class="load-event-time">${when.toLocaleString()}</div>
+          <div class="load-event-plex">${plexMatchHtml(ev)}</div>
         </div>
       `;
     }).join("");

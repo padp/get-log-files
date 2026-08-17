@@ -284,6 +284,24 @@ body {
   margin-top: 2px;
 }
 
+.load-event-plex {
+  margin-top: 2px;
+}
+
+.plex-match {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.plex-match-ok {
+  color: var(--color-success);
+}
+
+.plex-match-partial,
+.plex-match-none {
+  color: var(--color-danger);
+}
+
 /* ------------------------------------------------------------ */
 /* Supervisory override                                          */
 /* ------------------------------------------------------------ */

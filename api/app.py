@@ -253,36 +253,62 @@ def table_state():
     })
 
 
+
+# A physical delivery is seen by the camera first -- Plex scanning lags
+# behind it (confirmed earlier in this project: up to ~2-3 min). Consensus
+# itself also takes a few readings to confirm, so the true delivery moment
+# can be a little *before* the event's own recordedAt too. Wide enough to
+# comfortably cover both without drifting into the next unrelated delivery.
+_PLEX_MATCH_WINDOW_BEFORE_MIN = 5
+_PLEX_MATCH_WINDOW_AFTER_MIN = 15
+
+
 @app.route("/api/table-state/events", methods=["GET"])
 def table_state_events():
     """
     Every confirmedCount change (camera consensus, furnace decrement, manual
     override) is already logged to table_events -- this surfaces just the
-    increases, i.e. actual log deliveries to the table, timestamped, so they
-    can be checked against when Plex shows the matching move out of
-    PAD-Log Bay. oldCount=None (the very first consensus ever reached) counts
-    as an increase too via $ifNull, since there's no prior count to compare
-    against but logs still showed up. Internal bookkeeping (e.g. camera
-    consensus's raw reading detail, which includes collector-PC file paths)
-    is dropped -- only what's meaningful for this cross-check is returned.
+    increases, i.e. actual log deliveries to the table, timestamped, and
+    cross-checks each one against log_files.timeMoved (already captured by
+    inventory.py, no new Plex polling needed here -- timeMoved is set the
+    first time Plex shows a SerialNo at PAD-Extrusion SHARED, which is
+    exactly "when Plex considered this log to have arrived"). oldCount=None
+    (the very first consensus ever reached) counts as an increase too via
+    $ifNull, since there's no prior count to compare against but logs still
+    showed up. Internal bookkeeping (e.g. camera consensus's raw reading
+    detail, which includes collector-PC file paths) is dropped -- only
+    what's meaningful for this cross-check is returned.
     """
 
     limit = min(int(request.args.get("limit", 50)), 200)
 
-    docs = table_events_collection.find(
+    docs = list(table_events_collection.find(
         {"$expr": {"$gt": ["$newCount", {"$ifNull": ["$oldCount", -1]}]}}
-    ).sort("recordedAt", -1).limit(limit)
+    ).sort("recordedAt", -1).limit(limit))
 
-    events = [
-        {
-            "recordedAt": d.get("recordedAt"),
+    events = []
+    for d in docs:
+        recorded_at = d.get("recordedAt")
+        delta = d.get("newCount", 0) - (d.get("oldCount") or 0)
+
+        plex_matches = []
+        if recorded_at:
+            window_start = recorded_at - timedelta(minutes=_PLEX_MATCH_WINDOW_BEFORE_MIN)
+            window_end = recorded_at + timedelta(minutes=_PLEX_MATCH_WINDOW_AFTER_MIN)
+            plex_matches = list(lf_collection.find(
+                {"timeMoved": {"$gte": window_start, "$lte": window_end}},
+                {"SerialNo": 1, "timeMoved": 1, "_id": 0},
+            ))
+
+        events.append({
+            "recordedAt": recorded_at,
             "oldCount": d.get("oldCount"),
             "newCount": d.get("newCount"),
-            "delta": d.get("newCount", 0) - (d.get("oldCount") or 0),
+            "delta": delta,
             "reason": d.get("reason"),
-        }
-        for d in docs
-    ]
+            "plexMatchCount": len(plex_matches),
+            "plexMatches": plex_matches,
+        })
 
     return dumps(events)
 
