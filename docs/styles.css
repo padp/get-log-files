@@ -262,6 +262,11 @@ body {
   color: var(--color-text-muted);
 }
 
+#loadEventsList {
+  max-height: 240px; /* ~3-4 rows, the rest scrolls */
+  overflow-y: auto;
+}
+
 .load-event-row {
   padding: 8px 4px;
   border-bottom: 1px solid var(--color-border);
