@@ -17,6 +17,7 @@ import cv2
 import requests
 from datetime import datetime, timedelta
 from log_count import count_logs, annotate
+from diagnostics import save_diagnostic_chart, diagnostic_chart_path
 
 # Anchored to this file's own location rather than a bare relative path --
 # a bare "camera_snapshots" resolves differently depending on whatever
@@ -184,6 +185,18 @@ def update_camera_snapshots():
         os.makedirs(ANNOTATED_DIR, exist_ok=True)
         annotated_path = os.path.join(ANNOTATED_DIR, os.path.basename(path))
         cv2.imwrite(annotated_path, annotate(img, result))
+
+        # Local-only richer chart (brightness/energy/saturation/gradient,
+        # not just the plain annotated crop) -- table_state.py's own
+        # image mirror to Mongo stays the simple one, this is for whoever's
+        # actually digging through this folder on the collector PC. Every
+        # cycle gets one, same as the plain annotated image; table_state.py's
+        # existing delete/keep lifecycle for that image now manages this
+        # companion file too, so unused ones don't pile up.
+        try:
+            save_diagnostic_chart(img, result, diagnostic_chart_path(annotated_path))
+        except Exception as e:
+            print(f"[CAMERA] Failed to save diagnostic chart: {e}")
     except Exception as e:
         print(f"[CAMERA] Failed to count logs: {e}")
         result, annotated_path = None, None

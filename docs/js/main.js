@@ -5,7 +5,7 @@ import { loadKeyList } from "./renderList.js";
 import { updateDashboard } from "./renderDashboard.js";
 import { renderCampaigns, showCampaign } from "./renderCampaigns.js";
 import { updateScheduleStatus } from "./renderScheduleStatus.js";
-import { updateTableState, updateLoadEvents } from "./renderTableState.js";
+import { updateTableState, updateLoadEvents, updateReconciliation } from "./renderTableState.js";
 
 //--------------------------------------------------
 // Load data
@@ -30,6 +30,7 @@ async function loadData() {
 
     updateScheduleStatus();
     updateTableState();
+    updateReconciliation();
     updateLoadEvents();
 
     const unsortedCampaigns = await fetchCampaigns();

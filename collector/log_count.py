@@ -110,7 +110,7 @@ _ENERGY_WIN = 25
 
 class CountResult:
     def __init__(self, count, method, confidence, detrended, peaks, boundary_x=None,
-                 advisory=None, band="gradient", bands_agreed=True):
+                 advisory=None, band="gradient", bands_agreed=True, diagnostics=None):
         self.count = count
         self.method = method
         self.confidence = confidence    # 0-1
@@ -120,6 +120,7 @@ class CountResult:
         self.advisory = advisory        # dict or None -- see count_logs()
         self.band = band                # descriptive only now (single-pipeline) -- kept for callers/logging
         self.bands_agreed = bands_agreed  # True for a clean gradient-only read; False if gap-fill/confluence was needed
+        self.diagnostics = diagnostics  # dict or None -- everything save_diagnostic_chart needs, see count_logs()
 
     def __repr__(self):
         flag = f", advisory={self.advisory['measured_estimate']}" if self.advisory else ""
@@ -264,8 +265,20 @@ def count_logs(img):
                    for sig in (bright_x, sat_x, energy_x))
         return hits >= min_hits
 
+    diagnostics = {
+        "xs": xs,
+        "gradient": gradient,
+        "brightness_detrended": detrended,
+        "saturation_detrended": sat_detrended,
+        "energy": energy,
+        "pile": [],
+        "filled": [],
+        "bundle": [],
+    }
+
     if len(confirmed_x) == 0:
-        return CountResult(0, "gradient_peak", 0.0, gradient, [], band="gradient", bands_agreed=False)
+        return CountResult(0, "gradient_peak", 0.0, gradient, [], band="gradient", bands_agreed=False,
+                            diagnostics=diagnostics)
 
     order = np.argsort(confirmed_x)
     confirmed_x = confirmed_x[order]
@@ -273,6 +286,7 @@ def count_logs(img):
 
     pile = [confirmed_x[-1]]
     pile_prom = [confirmed_prom[-1]]
+    filled_positions = []
     used_fallback = False
     i = len(confirmed_x) - 1
     is_first_link = True
@@ -298,6 +312,7 @@ def count_logs(img):
                 if cand is not None:
                     pile.insert(0, cand)
                     pile_prom.insert(0, reference)
+                    filled_positions.append(cand)
             pile.insert(0, a)
             pile_prom.insert(0, a_prom)
             if not tight_fit:
@@ -337,10 +352,15 @@ def count_logs(img):
     else:
         confidence = min(1.0, 0.90 + 0.10 * capacity_ratio)
 
+    diagnostics["pile"] = list(pile)
+    diagnostics["filled"] = filled_positions
+    diagnostics["bundle"] = bundle_peaks
+
     return CountResult(
         count, "gradient_peak", confidence, gradient, pile,
         boundary_x=pile[0] if pile else None, advisory=advisory,
         band="gradient", bands_agreed=not (bundle_peaks or used_fallback),
+        diagnostics=diagnostics,
     )
 
 

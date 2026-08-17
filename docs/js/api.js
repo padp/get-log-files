@@ -108,6 +108,20 @@ export async function fetchTableStateEvents() {
   return JSON.parse(text);
 }
 
+// Omit hours to get the current-shift comparison (same boundary as "Logs
+// loaded this shift"); pass hours for a rolling window instead.
+export async function fetchTableStateReconciliation(hours = null) {
+  const params = hours != null ? `?hours=${hours}` : "";
+  const response = await fetch(`${API_BASE}/api/table-state/reconciliation${params}`);
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  return JSON.parse(text);
+}
+
 export function tableStateImageUrl() {
   // cache-busted so the <img> actually refetches each time the panel opens
   // rather than showing a stale browser-cached photo

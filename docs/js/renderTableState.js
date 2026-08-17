@@ -1,4 +1,4 @@
-import { fetchTableState, fetchTableStateEvents, tableStateImageUrl, submitTableStateOverride } from "./api.js";
+import { fetchTableState, fetchTableStateEvents, fetchTableStateReconciliation, tableStateImageUrl, submitTableStateOverride } from "./api.js";
 import { getDate } from "./dateUtils.js";
 
 const STALE_THRESHOLD_MS = 5 * 60 * 1000; // collector polls every ~60s; 5x that is a generous "still alive" window
@@ -94,16 +94,30 @@ const REASON_LABEL = {
   furnace_decrement: "furnace", // shouldn't normally appear here (that reason only ever decreases), kept as a fallback label
 };
 
-function plexMatchHtml(ev) {
-  if (ev.plexMatchCount >= ev.delta) {
-    return `<span class="plex-match plex-match-ok">&#10003; matched in Plex (${ev.plexMatchCount})</span>`;
-  }
+// Aggregate reconciliation for the current shift, replacing the old
+// per-event Plex-match indicator -- a delivery's recordedAt lags the real
+// delivery by an unpredictable amount (consensus takes a few readings to
+// confirm, and every furnace decrement resets that window), so comparing
+// individual event *timing* was unreliable. This compares running totals
+// instead, for the same shift "Logs loaded this shift" already uses: logs
+// delivered (summed count-increases, per the camera/table_state) vs logs
+// moved in Plex (log_files.timeMoved -- scanned in by the material
+// handler) -- a real, if coarser, traceability signal.
+export async function updateReconciliation() {
+  const el = document.getElementById("reconciliationSummary");
 
-  if (ev.plexMatchCount > 0) {
-    return `<span class="plex-match plex-match-partial">&#9888; only ${ev.plexMatchCount}/${ev.delta} matched in Plex</span>`;
-  }
+  try {
+    const r = await fetchTableStateReconciliation();
+    const windowLabel = r.sinceHours == null ? "this shift" : `last ${r.sinceHours}h`;
 
-  return `<span class="plex-match plex-match-none">&#9888; no matching Plex scan found</span>`;
+    const html = r.netDifference > 0
+      ? `<span class="reconciliation-bad">&#9888; ${r.delivered} delivered ${windowLabel}, ${r.moved} moved in Plex -- net +${r.netDifference} unaccounted</span>`
+      : `<span class="reconciliation-ok">&#10003; ${r.delivered} delivered ${windowLabel}, ${r.moved} moved in Plex -- reconciled</span>`;
+
+    if (el.innerHTML !== html) el.innerHTML = html;
+  } catch (err) {
+    console.error("Reconciliation check failed:", err);
+  }
 }
 
 export async function updateLoadEvents() {
@@ -127,7 +141,6 @@ export async function updateLoadEvents() {
           <span class="load-event-delta">+${ev.delta}</span>
           <b>${ev.newCount} on table</b> (${label})
           <div class="load-event-time">${when.toLocaleString()}</div>
-          <div class="load-event-plex">${plexMatchHtml(ev)}</div>
         </div>
       `;
     }).join("");

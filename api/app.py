@@ -295,31 +295,30 @@ def table_state():
     })
 
 
-
-# A physical delivery is seen by the camera first -- Plex scanning lags
-# behind it (confirmed earlier in this project: up to ~2-3 min). Consensus
-# itself also takes a few readings to confirm, so the true delivery moment
-# can be a little *before* the event's own recordedAt too. Wide enough to
-# comfortably cover both without drifting into the next unrelated delivery.
-_PLEX_MATCH_WINDOW_BEFORE_MIN = 5
-_PLEX_MATCH_WINDOW_AFTER_MIN = 15
-
-
 @app.route("/api/table-state/events", methods=["GET"])
 def table_state_events():
     """
     Every confirmedCount change (camera consensus, furnace decrement, manual
     override) is already logged to table_events -- this surfaces just the
-    increases, i.e. actual log deliveries to the table, timestamped, and
-    cross-checks each one against log_files.timeMoved (already captured by
-    inventory.py, no new Plex polling needed here -- timeMoved is set the
-    first time Plex shows a SerialNo at PAD-Extrusion SHARED, which is
-    exactly "when Plex considered this log to have arrived"). oldCount=None
-    (the very first consensus ever reached) counts as an increase too via
-    $ifNull, since there's no prior count to compare against but logs still
-    showed up. Internal bookkeeping (e.g. camera consensus's raw reading
-    detail, which includes collector-PC file paths) is dropped -- only
-    what's meaningful for this cross-check is returned.
+    increases, i.e. actual log deliveries to the table, timestamped.
+
+    This used to also cross-check each event against a tight time window
+    around log_files.timeMoved and flag ones with nothing nearby -- dropped
+    (2026-08-17) because it was the wrong tool: a delivery's recordedAt is
+    when 3 consecutive camera readings finally agreed, not when the log
+    arrived, and that can trail the real delivery by a lot more than any
+    reasonable window (every furnace decrement wipes the reading window and
+    forces consensus to rebuild from scratch; before the confidence-formula
+    fix, deliveries at counts <=6 couldn't reach consensus at all until
+    something else nudged the count higher). Comparing individual event
+    *timing* was fundamentally unreliable -- see /api/table-state/reconciliation
+    for the aggregate-count comparison that replaced it.
+
+    oldCount=None (the very first consensus ever reached) counts as an
+    increase too via $ifNull, since there's no prior count to compare
+    against but logs still showed up. Internal bookkeeping (e.g. camera
+    consensus's raw reading detail, which includes collector-PC file paths)
+    is dropped -- only what's meaningful here is returned.
     """
 
     limit = min(int(request.args.get("limit", 50)), 200)
@@ -328,31 +327,67 @@ def table_state_events():
         {"$expr": {"$gt": ["$newCount", {"$ifNull": ["$oldCount", -1]}]}}
     ).sort("recordedAt", -1).limit(limit))
 
-    events = []
-    for d in docs:
-        recorded_at = d.get("recordedAt")
-        delta = d.get("newCount", 0) - (d.get("oldCount") or 0)
-
-        plex_matches = []
-        if recorded_at:
-            window_start = recorded_at - timedelta(minutes=_PLEX_MATCH_WINDOW_BEFORE_MIN)
-            window_end = recorded_at + timedelta(minutes=_PLEX_MATCH_WINDOW_AFTER_MIN)
-            plex_matches = list(lf_collection.find(
-                {"timeMoved": {"$gte": window_start, "$lte": window_end}},
-                {"SerialNo": 1, "timeMoved": 1, "_id": 0},
-            ))
-
-        events.append({
-            "recordedAt": recorded_at,
+    events = [
+        {
+            "recordedAt": d.get("recordedAt"),
             "oldCount": d.get("oldCount"),
             "newCount": d.get("newCount"),
-            "delta": delta,
+            "delta": d.get("newCount", 0) - (d.get("oldCount") or 0),
             "reason": d.get("reason"),
-            "plexMatchCount": len(plex_matches),
-            "plexMatches": plex_matches,
-        })
+        }
+        for d in docs
+    ]
 
     return dumps(events)
+
+
+@app.route("/api/table-state/reconciliation", methods=["GET"])
+def table_state_reconciliation():
+    """
+    The actual question this whole feature exists to answer: over the same
+    period, has the same number of logs been delivered to the table (per
+    the camera/table_state, summed across every confirmedCount increase --
+    camera consensus and manual override alike, since a supervisor override
+    upward is itself evidence of a real delivery the camera couldn't
+    confirm on its own) as have been moved in Plex at PAD-Extrusion SHARED
+    (log_files.timeMoved, i.e. scanned in by the material handler)? This
+    deliberately does NOT try to pair up individual events by timing -- see
+    the docstring on /api/table-state/events for why that's unreliable. A
+    nonzero netDifference (delivered > moved) means logs are physically
+    arriving without a matching Plex move catching up, over the period as a
+    whole -- the actual traceability gap, tracked as a running total instead
+    of a fragile per-event match.
+
+    Defaults to the current shift (same boundary get_shift_start uses for
+    /api/dashboard's "Logs loaded this shift", so the two numbers are
+    directly comparable) -- pass ?hours=N for a rolling window instead, e.g.
+    to look at a longer trend.
+    """
+
+    hours_param = request.args.get("hours")
+    if hours_param is not None:
+        hours = min(float(hours_param), 24 * 30)
+        since = datetime.utcnow() - timedelta(hours=hours)
+    else:
+        since = get_shift_start(datetime.utcnow())
+        hours = None
+
+    delivered_docs = table_events_collection.find(
+        {"$expr": {"$gt": ["$newCount", {"$ifNull": ["$oldCount", -1]}]}, "recordedAt": {"$gte": since}}
+    )
+    delivered = sum(
+        d.get("newCount", 0) - (d.get("oldCount") or 0) for d in delivered_docs
+    )
+
+    moved = lf_collection.count_documents({"timeMoved": {"$gte": since}})
+
+    return dumps({
+        "sinceHours": hours,
+        "since": since,
+        "delivered": delivered,
+        "moved": moved,
+        "netDifference": delivered - moved,
+    })
 
 
 @app.route("/api/table-state/image", methods=["GET"])

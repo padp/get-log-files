@@ -32,6 +32,7 @@ from datetime import datetime
 from bson import Binary
 from database import table_state as state_collection, table_events as events_collection, table_state_image as image_collection
 from furnace import read_furnace_state
+from diagnostics import diagnostic_chart_path
 
 _STATE_ID = "current"
 
@@ -95,6 +96,17 @@ def _delete_photo(path):
     except Exception as e:
         print(f"[TABLE] Failed to delete unused annotated photo {path}: {e}")
 
+    # camera.py saves a companion diagnostic chart alongside every annotated
+    # image (local-only, never uploaded to Mongo) -- its lifecycle rides
+    # along with the plain image's: deleted here when unused, renamed in
+    # _tag_and_keep below when kept.
+    try:
+        diag_path = diagnostic_chart_path(path) if path else None
+        if diag_path and os.path.exists(diag_path):
+            os.remove(diag_path)
+    except Exception as e:
+        print(f"[TABLE] Failed to delete unused diagnostic chart for {path}: {e}")
+
 
 def _tag_and_keep(entry, reason, confirmed_count=None):
     """Renames an annotated photo in place to mark why it was kept -- e.g.
@@ -121,12 +133,20 @@ def _tag_and_keep(entry, reason, confirmed_count=None):
     else:
         new_name = f"{stem}__{reason}__count{entry['count']}__conf{entry['confidence']:.2f}{ext}"
     new_path = os.path.join(directory, new_name)
+    old_diag_path = diagnostic_chart_path(entry["path"])
     try:
         os.rename(entry["path"], new_path)
         entry["path"] = new_path
         entry["kept"] = True
     except Exception as e:
         print(f"[TABLE] Failed to tag/keep annotated photo {entry['path']}: {e}")
+        return
+
+    try:
+        if os.path.exists(old_diag_path):
+            os.rename(old_diag_path, diagnostic_chart_path(new_path))
+    except Exception as e:
+        print(f"[TABLE] Failed to rename companion diagnostic chart for {new_path}: {e}")
 
 
 def _apply_furnace_state(state, furnace):
