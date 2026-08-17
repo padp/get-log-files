@@ -4,8 +4,15 @@ from pymongo import MongoClient
 from bson.json_util import dumps
 from bson import ObjectId
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import os
+
+# The plant (Paducah, KY) runs on Central time -- shift boundaries below are
+# plant-local, not UTC. This API runs on Render, whose server clock is not
+# guaranteed to be plant-local (unlike the collector, which runs on-site and
+# can just use datetime.now()), so the conversion has to be explicit here.
+PLANT_TZ = ZoneInfo("America/Chicago")
 
 app = Flask(__name__)
 
@@ -73,23 +80,32 @@ OVERRIDE_PASSWORD = os.environ.get("OVERRIDE_PASSWORD")
 
 
 def get_shift_start(now=None):
+    """
+    Returns the current shift's start as a naive UTC datetime, matching how
+    timeMoved is stored (datetime.utcnow(), no tzinfo) so it can be compared
+    directly in a Mongo query. The 7/15/23 boundaries are evaluated in plant
+    local time -- doing this in UTC directly (the bug this replaced) puts
+    the boundaries at 1am/9am/5pm Central, hours away from the real shift
+    changes.
+    """
 
-    now = now or datetime.utcnow()
+    now_utc = (now or datetime.utcnow()).replace(tzinfo=timezone.utc)
+    local_now = now_utc.astimezone(PLANT_TZ)
 
-    shift1 = now.replace(hour=7, minute=0, second=0, microsecond=0)
-    shift2 = now.replace(hour=15, minute=0, second=0, microsecond=0)
-    shift3 = now.replace(hour=23, minute=0, second=0, microsecond=0)
+    shift1 = local_now.replace(hour=7, minute=0, second=0, microsecond=0)
+    shift2 = local_now.replace(hour=15, minute=0, second=0, microsecond=0)
+    shift3 = local_now.replace(hour=23, minute=0, second=0, microsecond=0)
 
-    if now >= shift3:
-        return shift3
+    if local_now >= shift3:
+        shift_start_local = shift3
+    elif local_now >= shift2:
+        shift_start_local = shift2
+    elif local_now >= shift1:
+        shift_start_local = shift1
+    else:
+        shift_start_local = shift3 - timedelta(days=1)
 
-    if now >= shift2:
-        return shift2
-
-    if now >= shift1:
-        return shift1
-
-    return (shift3 - timedelta(days=1))
+    return shift_start_local.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 # ============================================================
