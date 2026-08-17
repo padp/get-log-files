@@ -95,8 +95,14 @@ def inventory():
             ]
         }
 
+    # history is a per-item, ever-growing array of every Plex move that
+    # item has ever made -- the list/search view doesn't use it (the
+    # "moved without being run" flag only needs the separate, small
+    # lastMove/historyLoaded fields, both still included below), and it's
+    # by far the largest thing on some records. Full history is still
+    # available via /api/inventory/<item_id> when a record is opened.
     docs = list(
-        lf_collection.find(query).sort("timeMoved", -1)
+        lf_collection.find(query, {"history": 0}).sort("timeMoved", -1)
     )
 
     return dumps(docs)

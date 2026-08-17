@@ -2,6 +2,7 @@ import { state, getSortedEntries } from "./state.js";
 import { getDate } from "./dateUtils.js";
 import { showObject } from "./renderRecord.js";
 import { isFlaggedRemoval } from "./flagUtils.js";
+import { fetchInventoryItem } from "./api.js";
 
 export function renderKeys() {
   const filter = document.getElementById("search").value.toLowerCase();
@@ -26,11 +27,23 @@ export function renderKeys() {
       div.className = "item";
       div.dataset.id = row._id;
 
-      div.onclick = () => {
+      div.onclick = async () => {
         state.selectedId = row._id;
         container.querySelectorAll(".item.selected").forEach(el => el.classList.remove("selected"));
         div.classList.add("selected");
+
+        // Show what's already on hand immediately -- the list payload
+        // no longer includes each item's full move history (dropped for
+        // onload speed), so fetch that separately and fill it in once it
+        // arrives rather than block the click on it.
         showObject(row);
+
+        try {
+          const full = await fetchInventoryItem(row._id);
+          if (full && state.selectedId === row._id) showObject(full);
+        } catch (e) {
+          console.error("Failed to load full record detail", e);
+        }
       };
     }
 

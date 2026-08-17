@@ -11,6 +11,17 @@ export async function fetchInventory() {
   return JSON.parse(text);
 }
 
+export async function fetchInventoryItem(itemId) {
+  const response = await fetch(`${API_BASE}/api/inventory/${encodeURIComponent(itemId)}`);
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  return JSON.parse(text);
+}
+
 export async function fetchCampaigns() {
   const response = await fetch(`${API_BASE}/api/campaigns`);
   return response.json();
