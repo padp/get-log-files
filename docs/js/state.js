@@ -1,14 +1,9 @@
-import { getDate } from "./dateUtils.js";
-
 export const state = {
   jsonData: [],
   campaigns: [],
   selectedId: null,
   selectedCampaignId: null,
+  listQuery: "",
+  listLimit: 100,
+  listTotal: 0,
 };
-
-export function getSortedEntries() {
-  return [...state.jsonData].sort(
-    (a, b) => new Date(getDate(b.timeMoved)) - new Date(getDate(a.timeMoved))
-  );
-}

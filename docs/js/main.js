@@ -1,7 +1,7 @@
-import { fetchInventory, fetchCampaigns } from "./api.js";
+import { fetchDashboard, fetchCampaigns } from "./api.js";
 import { state } from "./state.js";
 import { getDate } from "./dateUtils.js";
-import { renderKeys } from "./renderList.js";
+import { loadKeyList } from "./renderList.js";
 import { updateDashboard } from "./renderDashboard.js";
 import { renderCampaigns, showCampaign } from "./renderCampaigns.js";
 import { updateScheduleStatus } from "./renderScheduleStatus.js";
@@ -12,17 +12,18 @@ import { updateTableState, updateLoadEvents } from "./renderTableState.js";
 //--------------------------------------------------
 async function loadData() {
   try {
-    state.jsonData = await fetchInventory();
-    console.log("JSON loaded:", state.jsonData.length);
-
+    // Search-panel list and dashboard shift stats are independent fetches
+    // now -- the list is paginated/server-searched (renderList.js owns its
+    // own fetching), and the dashboard is scoped server-side to just the
+    // current shift, so neither needs the other's data.
     try {
-      renderKeys();
+      await loadKeyList();
     } catch (e) {
-      console.error("renderKeys failed", e);
+      console.error("loadKeyList failed", e);
     }
 
     try {
-      updateDashboard();
+      updateDashboard(await fetchDashboard());
     } catch (e) {
       console.error("updateDashboard failed", e);
     }
@@ -44,10 +45,8 @@ async function loadData() {
 }
 
 //--------------------------------------------------
-// Search
+// Campaign select
 //--------------------------------------------------
-document.getElementById("search").addEventListener("input", renderKeys);
-
 document.getElementById("campaignSelect").addEventListener("change", e => {
   showCampaign(Number(e.target.value));
 });

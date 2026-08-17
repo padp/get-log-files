@@ -23,8 +23,13 @@ CORS(
 
 SQL_PASS = os.environ.get("SQL_PASS")
 
+# Bounds worst-case latency on every Mongo call this app makes (default is
+# 30s) -- matters more now that create_index below runs at import time and
+# would otherwise hang a cold start for the full default timeout if Mongo
+# happens to be slow to respond right then.
 client = MongoClient(
-    f"mongodb+srv://padpress1:{SQL_PASS}@cluster0.ywwxl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+    f"mongodb+srv://padpress1:{SQL_PASS}@cluster0.ywwxl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
+    serverSelectionTimeoutMS=5000)
 
 db = client["log_files"]
 
@@ -41,6 +46,19 @@ table_state_collection = db["table_state"]
 table_events_collection = db["table_events"]
 
 table_state_image_collection = db["table_state_image"]
+
+# No index existed on timeMoved before this -- every sort/filter on it
+# (the inventory list, the dashboard shift query, scanner-health's
+# most-recent lookup) was a full collection scan, and the collection only
+# ever grows (removed items are marked, never deleted). create_index is a
+# no-op if it already exists, so safe to call on every app startup rather
+# than needing a one-time manual step -- guarded so a transient Mongo
+# hiccup at cold start delays startup by at most the timeout above instead
+# of crashing the whole app.
+try:
+    lf_collection.create_index([("timeMoved", -1)])
+except Exception as e:
+    print(f"[STARTUP] Could not ensure timeMoved index (will retry next deploy/restart): {e}")
 
 # Shared supervisory-override credential, not a real per-user login --
 # matches this app's existing security posture (nothing else here is
@@ -78,6 +96,10 @@ def get_shift_start(now=None):
 # API: inventory list (optionally filtered)
 # ============================================================
 
+_INVENTORY_DEFAULT_LIMIT = 100
+_INVENTORY_MAX_LIMIT = 500
+
+
 @app.route("/api/inventory", methods=["GET"])
 def inventory():
 
@@ -95,6 +117,15 @@ def inventory():
             ]
         }
 
+    # The collection only ever grows (removed items are marked, never
+    # deleted) -- paginate rather than shipping the whole thing every load.
+    # Search (q) runs server-side against the same page window, so the
+    # frontend never needs the full collection just to filter it client-side.
+    limit = min(int(request.args.get("limit", _INVENTORY_DEFAULT_LIMIT) or _INVENTORY_DEFAULT_LIMIT), _INVENTORY_MAX_LIMIT)
+    skip = max(int(request.args.get("skip", 0) or 0), 0)
+
+    total = lf_collection.count_documents(query)
+
     # history is a per-item, ever-growing array of every Plex move that
     # item has ever made -- the list/search view doesn't use it (the
     # "moved without being run" flag only needs the separate, small
@@ -102,10 +133,10 @@ def inventory():
     # by far the largest thing on some records. Full history is still
     # available via /api/inventory/<item_id> when a record is opened.
     docs = list(
-        lf_collection.find(query, {"history": 0}).sort("timeMoved", -1)
+        lf_collection.find(query, {"history": 0}).sort("timeMoved", -1).skip(skip).limit(limit)
     )
 
-    return dumps(docs)
+    return dumps({"total": total, "limit": limit, "skip": skip, "rows": docs})
 
 
 # ============================================================
@@ -126,36 +157,25 @@ def inventory_item(item_id):
 
 @app.route("/api/dashboard", methods=["GET"])
 def dashboard():
+    """
+    Everything the dashboard's shift-count and Log Details panels need,
+    scoped to just the current shift -- a small, bounded set (a shift's
+    worth of deliveries, not the whole ever-growing collection), so unlike
+    /api/inventory this intentionally does NOT strip history: Log Details'
+    per-log "View History" dropdown needs it, and the set is small enough
+    that it's cheap to include here.
+    """
 
     now = datetime.utcnow()
     shift_start = get_shift_start(now)
 
-    pipeline = [
-        {
-            "$facet": {
-                "shiftCount": [
-                    {
-                        "$match": {
-                            "timeMoved": {"$gte": shift_start}
-                        }
-                    },
-                    {"$count": "count"}
-                ],
-                "recent": [
-                    {"$sort": {"timeMoved": -1}},
-                    {"$limit": 12}
-                ]
-            }
-        }
-    ]
-
-    result = list(lf_collection.aggregate(pipeline))[0]
-
-    shift_count = result["shiftCount"][0]["count"] if result["shiftCount"] else 0
+    shift_entries = list(
+        lf_collection.find({"timeMoved": {"$gte": shift_start}}).sort("timeMoved", -1)
+    )
 
     return dumps({
-        "shiftCount": shift_count,
-        "recent": result["recent"]
+        "shiftCount": len(shift_entries),
+        "shiftEntries": shift_entries,
     })
 
 

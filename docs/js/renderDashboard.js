@@ -1,4 +1,3 @@
-import { getSortedEntries } from "./state.js";
 import { getDate } from "./dateUtils.js";
 import { getId } from "./bsonUtils.js";
 
@@ -46,24 +45,6 @@ function buildCampaignMajorityLengths(entries) {
   });
 
   return majorityByCampaign;
-}
-
-function getCurrentShiftStart() {
-  const now = new Date();
-
-  const s1 = new Date(now); s1.setHours(7, 0, 0, 0);
-  const s2 = new Date(now); s2.setHours(15, 0, 0, 0);
-  const s3 = new Date(now); s3.setHours(23, 0, 0, 0);
-
-  if (now >= s3) return s3;
-  if (now >= s2) return s2;
-  if (now >= s1) return s1;
-
-  const y = new Date(now);
-  y.setDate(y.getDate() - 1);
-  y.setHours(23, 0, 0, 0);
-
-  return y;
 }
 
 function logLength(data, majorityByCampaign) {
@@ -181,21 +162,17 @@ function updateLogRow(row, v, majorityByCampaign) {
   }
 }
 
-export function updateDashboard() {
-  const entries = getSortedEntries();
-  const shiftStart = getCurrentShiftStart();
-  const majorityByCampaign = buildCampaignMajorityLengths(entries);
-
-  const shiftCount = entries.filter(
-    v => new Date(getDate(v.timeMoved)) >= shiftStart
-  ).length;
+// data is /api/dashboard's response ({ shiftCount, shiftEntries }) --
+// shift-scoped server-side, so this never needs the full inventory list.
+export function updateDashboard(data) {
+  const shiftEntries = data.shiftEntries || [];
+  const majorityByCampaign = buildCampaignMajorityLengths(shiftEntries);
 
   const shiftCountEl = document.getElementById("shiftCount");
-  const shiftCountText = `Logs loaded this shift: ${shiftCount}`;
+  const shiftCountText = `Logs loaded this shift: ${data.shiftCount}`;
   if (shiftCountEl.textContent !== shiftCountText) shiftCountEl.textContent = shiftCountText;
 
   const recent = document.getElementById("recentLogs");
-  const shiftEntries = entries.slice(0, shiftCount);
 
   const existing = new Map();
   recent.querySelectorAll(".log-row").forEach(el => existing.set(el.dataset.id, el));

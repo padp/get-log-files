@@ -116,6 +116,24 @@ body {
   background: var(--color-surface);
 }
 
+.load-more-btn {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.load-more-btn:hover {
+  background: var(--color-accent-soft);
+}
+
 #campaignSelect {
   width: 100%;
 }

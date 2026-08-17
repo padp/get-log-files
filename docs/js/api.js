@@ -1,7 +1,27 @@
 export const API_BASE = "https://get-log-files.onrender.com";
 
-export async function fetchInventory() {
-  const response = await fetch(`${API_BASE}/api/inventory`);
+// Returns { total, limit, skip, rows } -- paginated and, when q is set,
+// filtered server-side. rows never include each item's history (see
+// api/app.py) -- fetchInventoryItem below for full per-record detail.
+export async function fetchInventory({ q = "", limit = 100, skip = 0 } = {}) {
+  const params = new URLSearchParams({ limit, skip });
+  if (q) params.set("q", q);
+
+  const response = await fetch(`${API_BASE}/api/inventory?${params}`);
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  return JSON.parse(text);
+}
+
+// Everything the dashboard's shift-count and Log Details panels need,
+// scoped server-side to just the current shift -- never needs the full
+// inventory list at all.
+export async function fetchDashboard() {
+  const response = await fetch(`${API_BASE}/api/dashboard`);
   const text = await response.text();
 
   if (!response.ok) {
