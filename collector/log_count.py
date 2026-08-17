@@ -311,8 +311,19 @@ def count_logs(img):
 
     count = len(pile)
     capacity_ratio = count / _MAX_CAPACITY
-    confidence = min(1.0, 0.6 + 0.4 * capacity_ratio)
 
+    # Confidence reflects how much inference went into this specific read,
+    # not how full the table happens to be -- a clean, width/prominence-
+    # filtered gradient read of 3 logs is exactly as trustworthy as one of
+    # 9, since the shape-based filtering is what validates it either way.
+    # The old capacity-ratio-scaled formula didn't distinguish these and
+    # structurally capped confidence below 0.85 for any count <= 6 (0.6 +
+    # 0.4*(6/10) = 0.84) -- so a real, repeated, correct low-count reading
+    # could never reach table_state.py's consensus threshold at all, and a
+    # genuine load event onto a mostly-empty table got silently stuck
+    # behind the furnace's decrement-only side (confirmed live 2026-08-17:
+    # table physically had 5 logs, camera read 5 cleanly and repeatedly,
+    # confirmedCount stayed wedged at 3).
     advisory = None
     if bundle_peaks:
         advisory = {
@@ -320,9 +331,11 @@ def count_logs(img):
             "measured_estimate": count + _BUNDLE_SIZE,
             "boundary_x": bundle_peaks[-1],
         }
-        confidence = min(confidence, 0.3)
+        confidence = 0.3
     elif used_fallback:
-        confidence = min(confidence, 0.75)
+        confidence = 0.75
+    else:
+        confidence = min(1.0, 0.90 + 0.10 * capacity_ratio)
 
     return CountResult(
         count, "gradient_peak", confidence, gradient, pile,
