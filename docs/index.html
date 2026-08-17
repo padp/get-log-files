@@ -22,28 +22,20 @@
 
     <div class="panels">
       <div id="left" class="active-panel">
-        <input type="text" id="search" placeholder="Search..." />
-        <div id="keyList"></div>
+        <div class="metric-card metric-highlight">
+          <h2 id="shiftCount">Logs loaded this shift: 0</h2>
+        </div>
       </div>
 
       <div id="right">
-        <div class="metric-card" id="scannerHealthCard">
-          <h3>Scanner Status</h3>
-          <div id="scannerHealthBody">Checking...</div>
-        </div>
-
         <div class="metric-card" id="scheduleStatusCard">
-          <h3>Next Alloy Change</h3>
+          <h3>Schedule</h3>
           <div id="scheduleStatusBody">Checking...</div>
         </div>
 
         <div class="metric-card" id="tableStateCard">
-          <h3>Log Pusher Table</h3>
+          <h3>Log Table</h3>
           <div id="tableStateBody">Checking...</div>
-        </div>
-
-        <div class="metric-card metric-highlight">
-          <h2 id="shiftCount">Logs This Shift: 0</h2>
         </div>
 
         <div class="metric-card">
@@ -57,7 +49,7 @@
         </div>
 
         <details>
-          <summary>Raw JSON</summary>
+          <summary>Expanded JSON</summary>
           <pre id="rawJson"></pre>
         </details>
       </div>
@@ -71,6 +63,11 @@
           <div id="campaignSummary"></div>
 
           <div id="campaignLogs"></div>
+        </div>
+
+        <div class="metric-card">
+          <input type="text" id="search" placeholder="Search..." />
+          <div id="keyList"></div>
         </div>
       </div>
     </div>

@@ -214,6 +214,42 @@ body {
 }
 
 /* ------------------------------------------------------------ */
+/* Schedule breakdown                                             */
+/* ------------------------------------------------------------ */
+
+.schedule-job-row {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.schedule-job-row:last-child {
+  border-bottom: none;
+}
+
+.schedule-job-current {
+  font-weight: 600;
+}
+
+.schedule-job-billets {
+  float: right;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.schedule-job-detail {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.schedule-no-breakdown {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
+/* ------------------------------------------------------------ */
 /* Cards                                                          */
 /* ------------------------------------------------------------ */
 
@@ -251,17 +287,9 @@ body {
   border-color: var(--color-success);
 }
 
-.status-ok #scannerHealthBody {
-  color: var(--color-success);
-}
-
 .status-alert {
   background: linear-gradient(135deg, var(--color-danger-soft), var(--color-surface));
   border-color: var(--color-danger);
-}
-
-.status-alert #scannerHealthBody {
-  color: var(--color-danger);
 }
 
 #recordSummary,

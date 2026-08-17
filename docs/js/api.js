@@ -27,17 +27,6 @@ export async function fetchCampaignDetails(campaignId) {
   return JSON.parse(text);
 }
 
-export async function fetchScannerHealth() {
-  const response = await fetch(`${API_BASE}/api/scanner-health`);
-  const text = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${text}`);
-  }
-
-  return JSON.parse(text);
-}
-
 export async function fetchScheduleStatus() {
   const response = await fetch(`${API_BASE}/api/schedule-status`);
 

@@ -16,6 +16,27 @@ function formatDuration(seconds) {
   return `${hours}h ${mins}m`;
 }
 
+function renderBreakdown(breakdown) {
+  if (!Array.isArray(breakdown)) {
+    return `<div class="schedule-no-breakdown">Update the collector to see the schedule breakdown.</div>`;
+  }
+
+  const rows = breakdown.map(job => `
+    <div class="schedule-job-row${job.current ? " schedule-job-current" : ""}">
+      <span class="schedule-job-billets">${job.billets} billet${job.billets === 1 ? "" : "s"}</span>
+      <b>Job ${job.job}</b> -- Die ${job.die}${job.dieCopy ? `/${job.dieCopy}` : ""}
+      <div class="schedule-job-detail">${job.part}${job.current ? " &middot; in progress now" : ""}</div>
+    </div>
+  `).join("");
+
+  return `
+    <details>
+      <summary>Show schedule breakdown (${breakdown.length} job${breakdown.length === 1 ? "" : "s"})</summary>
+      ${rows}
+    </details>
+  `;
+}
+
 export async function updateScheduleStatus() {
   const card = document.getElementById("scheduleStatusCard");
   const body = document.getElementById("scheduleStatusBody");
@@ -38,6 +59,7 @@ export async function updateScheduleStatus() {
       <b>Billets Remaining:</b> ${status.billetsRemaining}<br>
       <b>Jobs Remaining:</b> ${status.jobsRemaining}<br>
       <b>Est. Time to Change:</b> ${formatDuration(status.etaSeconds)}
+      ${renderBreakdown(status.breakdown)}
       ${isStale
         ? `<div class="schedule-stale">&#9888; Last updated ${updatedAt.toLocaleTimeString()} -- collector may not be running</div>`
         : ""}

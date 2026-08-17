@@ -4,7 +4,6 @@ import { getDate } from "./dateUtils.js";
 import { renderKeys } from "./renderList.js";
 import { updateDashboard } from "./renderDashboard.js";
 import { renderCampaigns, showCampaign } from "./renderCampaigns.js";
-import { updateScannerHealth } from "./renderScannerHealth.js";
 import { updateScheduleStatus } from "./renderScheduleStatus.js";
 import { updateTableState } from "./renderTableState.js";
 
@@ -28,7 +27,6 @@ async function loadData() {
       console.error("updateDashboard failed", e);
     }
 
-    updateScannerHealth();
     updateScheduleStatus();
     updateTableState();
 

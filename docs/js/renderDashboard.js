@@ -191,7 +191,7 @@ export function updateDashboard() {
   ).length;
 
   const shiftCountEl = document.getElementById("shiftCount");
-  const shiftCountText = `Logs This Shift: ${shiftCount}`;
+  const shiftCountText = `Logs loaded this shift: ${shiftCount}`;
   if (shiftCountEl.textContent !== shiftCountText) shiftCountEl.textContent = shiftCountText;
 
   const recent = document.getElementById("recentLogs");
