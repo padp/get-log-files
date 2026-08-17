@@ -1,7 +1,50 @@
-import { fetchTableState } from "./api.js";
+import { fetchTableState, fetchTableStateEvents, tableStateImageUrl, submitTableStateOverride } from "./api.js";
 import { getDate } from "./dateUtils.js";
 
 const STALE_THRESHOLD_MS = 5 * 60 * 1000; // collector polls every ~60s; 5x that is a generous "still alive" window
+
+//--------------------------------------------------
+// Supervisory override -- wired once at load, since the <details>/<form>
+// live outside #tableStateBody and survive the 30s poll's innerHTML swaps
+//--------------------------------------------------
+const supervisoryPanel = document.getElementById("supervisoryPanel");
+const supervisoryImage = document.getElementById("supervisoryImage");
+const supervisoryForm = document.getElementById("supervisoryForm");
+const supervisoryMessage = document.getElementById("supervisoryMessage");
+
+supervisoryPanel.addEventListener("toggle", () => {
+  if (!supervisoryPanel.open) return;
+
+  // re-fetch (cache-busted) every time it's opened, not just the first --
+  // a supervisor deciding whether to override wants the *current* photo
+  supervisoryImage.innerHTML = `<img src="${tableStateImageUrl()}" alt="Most recent table photo" />`;
+});
+
+supervisoryForm.addEventListener("submit", async e => {
+  e.preventDefault();
+
+  const count = Number(document.getElementById("overrideCount").value);
+  const username = document.getElementById("overrideUsername").value;
+  const password = document.getElementById("overridePassword").value;
+  const reason = document.getElementById("overrideReason").value;
+
+  supervisoryMessage.textContent = "Saving...";
+
+  try {
+    await submitTableStateOverride({ count, username, password, reason });
+
+    supervisoryMessage.textContent = `Saved -- confirmed count set to ${count}.`;
+    supervisoryMessage.classList.remove("supervisory-error");
+    document.getElementById("overrideCount").value = "";
+    document.getElementById("overridePassword").value = "";
+    document.getElementById("overrideReason").value = "";
+
+    updateTableState();
+  } catch (err) {
+    supervisoryMessage.textContent = `Failed: ${err.message}`;
+    supervisoryMessage.classList.add("supervisory-error");
+  }
+});
 
 export async function updateTableState() {
   const card = document.getElementById("tableStateCard");
@@ -41,5 +84,43 @@ export async function updateTableState() {
     card.classList.toggle("status-alert", isStale || !hasUpdatedAt);
   } catch (err) {
     console.error("Table state check failed:", err);
+  }
+}
+
+// reason -> a short, human label for what triggered this delivery's count increase
+const REASON_LABEL = {
+  camera_consensus: "camera",
+  manual_override: "manual correction",
+  furnace_decrement: "furnace", // shouldn't normally appear here (that reason only ever decreases), kept as a fallback label
+};
+
+export async function updateLoadEvents() {
+  const list = document.getElementById("loadEventsList");
+
+  try {
+    const events = await fetchTableStateEvents();
+
+    if (!events || events.length === 0) {
+      const html = "<i>No deliveries recorded yet.</i>";
+      if (list.innerHTML !== html) list.innerHTML = html;
+      return;
+    }
+
+    const html = events.map(ev => {
+      const when = new Date(getDate(ev.recordedAt));
+      const label = REASON_LABEL[ev.reason] || ev.reason || "unknown";
+
+      return `
+        <div class="load-event-row">
+          <span class="load-event-delta">+${ev.delta}</span>
+          <b>${ev.newCount} on table</b> (${label})
+          <div class="load-event-time">${when.toLocaleString()}</div>
+        </div>
+      `;
+    }).join("");
+
+    if (list.innerHTML !== html) list.innerHTML = html;
+  } catch (err) {
+    console.error("Load events check failed:", err);
   }
 }

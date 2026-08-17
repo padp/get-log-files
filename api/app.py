@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, Response
 from flask_cors import CORS
 from pymongo import MongoClient
 from bson.json_util import dumps
@@ -37,6 +37,17 @@ billet_collection = db["billet_log"]
 schedule_status_collection = db["schedule_status"]
 
 table_state_collection = db["table_state"]
+
+table_events_collection = db["table_events"]
+
+table_state_image_collection = db["table_state_image"]
+
+# Shared supervisory-override credential, not a real per-user login --
+# matches this app's existing security posture (nothing else here is
+# authenticated either), just enough to keep the write path from being
+# wide open to anyone who finds the URL. Set on Render, never hardcoded.
+OVERRIDE_USERNAME = os.environ.get("OVERRIDE_USERNAME")
+OVERRIDE_PASSWORD = os.environ.get("OVERRIDE_PASSWORD")
 
 # ============================================================
 # Helper: shift start logic (same as your JS)
@@ -240,6 +251,123 @@ def table_state():
         "confirmedCount": doc.get("confirmedCount"),
         "updatedAt": doc.get("updatedAt"),
     })
+
+
+@app.route("/api/table-state/events", methods=["GET"])
+def table_state_events():
+    """
+    Every confirmedCount change (camera consensus, furnace decrement, manual
+    override) is already logged to table_events -- this surfaces just the
+    increases, i.e. actual log deliveries to the table, timestamped, so they
+    can be checked against when Plex shows the matching move out of
+    PAD-Log Bay. oldCount=None (the very first consensus ever reached) counts
+    as an increase too via $ifNull, since there's no prior count to compare
+    against but logs still showed up. Internal bookkeeping (e.g. camera
+    consensus's raw reading detail, which includes collector-PC file paths)
+    is dropped -- only what's meaningful for this cross-check is returned.
+    """
+
+    limit = min(int(request.args.get("limit", 50)), 200)
+
+    docs = table_events_collection.find(
+        {"$expr": {"$gt": ["$newCount", {"$ifNull": ["$oldCount", -1]}]}}
+    ).sort("recordedAt", -1).limit(limit)
+
+    events = [
+        {
+            "recordedAt": d.get("recordedAt"),
+            "oldCount": d.get("oldCount"),
+            "newCount": d.get("newCount"),
+            "delta": d.get("newCount", 0) - (d.get("oldCount") or 0),
+            "reason": d.get("reason"),
+        }
+        for d in docs
+    ]
+
+    return dumps(events)
+
+
+@app.route("/api/table-state/image", methods=["GET"])
+def table_state_image():
+    """
+    table_state.py mirrors the most recent annotated camera snapshot into
+    Mongo every reconciliation cycle specifically so this can serve it --
+    the collector PC itself isn't reachable from outside the plant network,
+    so this is the only way the dashboard's supervisory panel can show a
+    supervisor what the camera actually saw.
+    """
+
+    doc = table_state_image_collection.find_one({"_id": "current"})
+
+    if doc is None or not doc.get("image"):
+        return {"error": "No table snapshot available yet"}, 404
+
+    return Response(bytes(doc["image"]), mimetype="image/jpeg")
+
+
+@app.route("/api/table-state/override", methods=["POST"])
+def table_state_override():
+    """
+    Manual supervisory correction of confirmedCount -- exists because the
+    camera/furnace reconciliation can get wedged (e.g. a delivery the camera
+    saw clearly but couldn't reach consensus confidence on, while nothing
+    ever gave the furnace side a reason to move) with no automatic way back
+    to the true count. Gated by a shared passcode (not real per-user auth,
+    same security posture as the rest of this app) and always logged to
+    table_events with who/why, same as every other confirmedCount change.
+    """
+
+    if not OVERRIDE_USERNAME or not OVERRIDE_PASSWORD:
+        return {"error": "Manual override is not configured on the server"}, 503
+
+    body = request.get_json(silent=True) or {}
+
+    username = body.get("username", "")
+    password = body.get("password", "")
+
+    if username != OVERRIDE_USERNAME or password != OVERRIDE_PASSWORD:
+        return {"error": "Invalid username or password"}, 401
+
+    count = body.get("count")
+
+    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+        return {"error": "count must be a non-negative integer"}, 400
+
+    reason = (body.get("reason") or "").strip()
+
+    doc = table_state_collection.find_one({"_id": "current"})
+    old_count = doc.get("confirmedCount") if doc else None
+
+    now = datetime.utcnow()
+
+    # Clear recentCameraReadings so stale pre-override readings can't
+    # immediately look like a "greater than current" consensus and fight
+    # the correction -- same reasoning as the furnace-decrement reset in
+    # table_state.py, only fresh readings taken after this point should
+    # count toward the next one.
+    table_state_collection.update_one(
+        {"_id": "current"},
+        {
+            "$set": {
+                "confirmedCount": count,
+                "updatedAt": now,
+                "recentCameraReadings": [],
+            }
+        },
+        upsert=True,
+    )
+
+    table_events_collection.insert_one({
+        "reason": "manual_override",
+        "oldCount": old_count,
+        "newCount": count,
+        "detail": {"username": username, "reason": reason},
+        "recordedAt": now,
+    })
+
+    print(f"[TABLE OVERRIDE] {username}: {old_count} -> {count} ({reason or 'no reason given'})")
+
+    return {"confirmedCount": count}
 
 
 # ============================================================

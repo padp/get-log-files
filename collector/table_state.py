@@ -29,7 +29,8 @@ changes, an audit row is appended to database.table_events recording why.
 """
 import os
 from datetime import datetime
-from database import table_state as state_collection, table_events as events_collection
+from bson import Binary
+from database import table_state as state_collection, table_events as events_collection, table_state_image as image_collection
 from furnace import read_furnace_state
 
 _STATE_ID = "current"
@@ -238,6 +239,23 @@ def _apply_camera_result(state, camera_result, annotated_path):
             print(f"[TABLE] Camera consensus ({consensus}) is not greater than confirmed count ({old}) -- ignored, decreases are the furnace's job")
 
 
+def _save_latest_image(path):
+    """Mirrors the most recent annotated snapshot into Mongo so the web
+    dashboard's supervisory panel can show it for a remote sanity check.
+    Read up front in update_table_state, before this cycle's reconciliation
+    has any chance to rename or delete the same file out from under it."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+        image_collection.replace_one(
+            {"_id": "current"},
+            {"_id": "current", "image": Binary(data), "updatedAt": datetime.utcnow()},
+            upsert=True,
+        )
+    except Exception as e:
+        print(f"[TABLE] Failed to save latest image: {e}")
+
+
 def update_table_state(camera_result, annotated_path=None):
     """Runs one reconciliation cycle: folds in the latest camera reading
     (for consensus-based re-anchoring, and to manage that photo's lifecycle)
@@ -246,6 +264,9 @@ def update_table_state(camera_result, annotated_path=None):
     doesn't lose the camera-side update, and vice versa. Returns the current
     confirmed count (may be None if no consensus has been reached yet)."""
     state = _get_state()
+
+    if annotated_path and os.path.exists(annotated_path):
+        _save_latest_image(annotated_path)
 
     if camera_result is not None:
         _apply_camera_result(state, camera_result, annotated_path)

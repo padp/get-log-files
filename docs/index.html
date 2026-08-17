@@ -36,6 +36,25 @@
         <div class="metric-card" id="tableStateCard">
           <h3>Log Table</h3>
           <div id="tableStateBody">Checking...</div>
+
+          <div id="loadEventsHeader" class="load-events-header">Recent deliveries</div>
+          <div id="loadEventsList"><i>Checking...</i></div>
+
+          <details id="supervisoryPanel">
+            <summary>Supervisory override</summary>
+
+            <div id="supervisoryImage"><i>Photo loads when opened...</i></div>
+
+            <form id="supervisoryForm">
+              <input type="number" id="overrideCount" placeholder="Correct count" min="0" step="1" required />
+              <input type="text" id="overrideUsername" placeholder="Username" autocomplete="username" required />
+              <input type="password" id="overridePassword" placeholder="Password" autocomplete="current-password" required />
+              <input type="text" id="overrideReason" placeholder="Reason (optional)" />
+              <button type="submit">Save correction</button>
+            </form>
+
+            <div id="supervisoryMessage"></div>
+          </details>
         </div>
 
         <div class="metric-card">
