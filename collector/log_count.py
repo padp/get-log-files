@@ -107,6 +107,31 @@ _ENERGY_MIN_PROMINENCE = 4
 # Local-energy (rolling std of detrended brightness) window.
 _ENERGY_WIN = 25
 
+# Second pass, right-to-left, past the pile's own outer (non-anchor) edge:
+# gradient can miss a real log there if the lighting is too diffuse to
+# produce a sharp edge (the same limitation seen on whole-frame no-glare
+# shots), but the brightness/saturation shoulder of a real log still shows
+# up even when gradient doesn't. Deliberately checked with only these two
+# signals (not gradient, not energy) and only in the one-pitch window past
+# the current outer edge -- confirmed live 2026-08-17: table physically had
+# 6 confirmed peaks plus one more real log ~67px past the outer edge,
+# gradient magnitude there (53, broad/width-rejected) well under a real
+# edge's (104-167 in the same frame), but a genuine 25.6-prominence
+# brightness peak and a 7.7-prominence saturation peak both sat right there.
+# Window widened slightly past the literal "70-80" to 65-85 to catch that
+# exact case (67px), matching the pitch variance (72-77px) already observed
+# among this same frame's own confirmed gaps. Thresholds swept against the
+# full 59-photo regression corpus (1-38.jpg, fresh_AJ, fresh_KT, this live
+# frame): at bright>=15 and sat>=6, the live frame is the only one in the
+# corpus where both clear the bar at once (next-closest paired case is
+# roughly half as strong on whichever signal is weaker) -- comfortable
+# separation, not a threshold shaved to fit a single example.
+_LEFT_EXT_MIN_DIST = 65
+_LEFT_EXT_MAX_DIST = 85
+_LEFT_EXT_BRIGHT_MIN_PROMINENCE = 15
+_LEFT_EXT_SAT_MIN_PROMINENCE = 6
+_LEFT_EXT_MAX_STEPS = 3
+
 
 class CountResult:
     def __init__(self, count, method, confidence, detrended, peaks, boundary_x=None,
@@ -323,6 +348,27 @@ def count_logs(img):
         break
 
     bundle_peaks = list(confirmed_x[:i])
+
+    # Left-edge extension: one more pitch-slot past the pile's own outer
+    # edge, using only brightness/saturation (gradient already had its shot
+    # at every position out here and found nothing sharp enough). Walks
+    # further left as long as each new slot keeps clearing both bars.
+    bright_ext_idx, _ = find_peaks(detrended, prominence=_LEFT_EXT_BRIGHT_MIN_PROMINENCE)
+    sat_ext_idx, _ = find_peaks(sat_detrended, prominence=_LEFT_EXT_SAT_MIN_PROMINENCE)
+    bright_ext_x = xs[bright_ext_idx]
+    sat_ext_x = xs[sat_ext_idx]
+    for _ in range(_LEFT_EXT_MAX_STEPS):
+        edge = pile[0]
+        lo, hi = edge - _LEFT_EXT_MAX_DIST, edge - _LEFT_EXT_MIN_DIST
+        b_cand = [x for x in bright_ext_x if lo <= x <= hi]
+        s_cand = [x for x in sat_ext_x if lo <= x <= hi]
+        if not b_cand or not s_cand:
+            break
+        cand = max(s_cand)  # saturation tracks the true edge closely; brightness peaks its shoulder
+        pile.insert(0, cand)
+        pile_prom.insert(0, float(np.median(pile_prom)))
+        filled_positions.append(cand)
+        used_fallback = True
 
     count = len(pile)
     capacity_ratio = count / _MAX_CAPACITY
