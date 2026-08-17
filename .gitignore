@@ -26,3 +26,7 @@ collector/yolo_dataset/
 # Local-testing-only secrets copy (this network share's layout differs from the
 # real collector PC's -- production secrets live outside the repo, at ../secret/)
 /secret/
+
+# Presentation materials built from facility photos -- same reasoning as
+# camera_snapshots above, never publish
+/deliverables/
