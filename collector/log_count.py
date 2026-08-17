@@ -8,6 +8,13 @@ move. The four corners below were extracted (via HSV color-threshold +
 contour detection) from a hand-drawn bounding box the user marked around the
 log-table region on sample photo 6.jpg, at native 3840x2160 resolution.
 
+Counting itself is gradient-edge-based (2026-08-15), replacing the earlier
+brightness-ridge/dual-band approach -- validated against two fresh,
+hand-counted 10-photo samples the algorithm was never tuned against
+(8/10 and 8/10 exact, remaining misses diagnosed and fixed) plus the
+original 38-photo labeled set. See collector/camera_snapshots_sample/ for
+the labeled sets this was checked against.
+
 Usage: python log_count.py <path-to-jpg> [<path-to-jpg> ...]
 """
 import sys
@@ -48,86 +55,75 @@ _DST = cv2.transform(_axis_aligned_dst.reshape(-1, 1, 2), _rot).reshape(-1, 2)
 
 _WARP_MATRIX = cv2.getPerspectiveTransform(_SRC, _DST)
 
-# Two sampling bands within the warped crop, both run on every frame; when
-# they disagree on the count, _gap_consistency picks whichever one's final
-# peaks are more evenly spaced at the known pitch (see count_logs).
-#
-# Band 1 ("primary"): originally a fixed horizontal row range (rows
-# 130-230) kept high to stay above the foreground safety fence -- but the
-# fence crosses the frame diagonally (its top edge is much higher on the
-# anchor/right side than on the left), so a horizontal band is really a
-# compromise between staying clear of the fence on the right and staying
-# clear of the brightest door glare (which turned out to sit right at the
-# top of the hand-drawn box) on the left. The user hand-marked a band that
-# instead runs parallel to the fence's actual diagonal, on a shortened
-# `warp_log_region()` crop of 6.jpg (`6_warped_angledandshortened.jpg`,
-# 2026-08-12) -- extracted via Hough line detection on the two drawn black
-# boundary lines, both slope~0.966 (~44 deg). Validated against a 38-photo
-# hand-labeled set: mean abs error 0.68 vs 1.47 for the old horizontal band
-# (after also fixing _merge_close_peaks/_trim_to_pile below to anchor on the
-# known fixed pitch instead of re-deriving it per frame -- the horizontal
-# band produced corrupted anchor-side signal on some frames much more often
-# than the angled one does).
-#
-# Band 2 ("rail-anchored"): the primary band's region sometimes still
-# contains real background structure (a roof/wall panel and cross-brace
-# truss, confirmed on a live frame 2026-08-13 -- the user first suspected
-# the fence, and while that specific panel wasn't it, the same investigation
-# led here) that echoes the log pitch closely enough to fool peak detection
-# entirely -- all peaks landing on structure, missing the real pile. The
-# user hand-marked the fence's top rail edge directly on that live frame
-# (`logpusher_20260813_084801_review.jpg`) as a candidate new lower
-# boundary; fit via linear regression on the marked pixels: slope=0.9473,
-# intercept=211.5. Anchoring a band directly there eliminates that failure
-# but introduces a different one (noisier/fragmented signal on some frames,
-# `_MARGIN2` below pulls the band away from the rail to reduce that). Best
-# single-band result found: 45px margin, mean abs error 0.68 / 24/38 (63%)
-# exact on the labeled set (vs 18/38 for band 1 alone) -- but still fails
-# badly on a few frames band 1 handles fine, hence running both.
+# Sampling band within the warped crop: runs parallel to the safety fence
+# (slope ~0.966, ~44 deg), hand-marked via Hough line detection on a
+# shortened warp of 6.jpg. Column x within [_MARGIN, _WARP_WIDTH-_MARGIN)
+# samples rows [slope*x+_BAND1_UPPER_INTERCEPT, slope*x+_BAND1_LOWER_INTERCEPT).
 _MARGIN = 25
-
 _BAND1_SLOPE = 0.966
 _BAND1_UPPER_INTERCEPT = -13.5
 _BAND1_LOWER_INTERCEPT = 129.0
 
-_RAIL_SLOPE = 0.9473
-_RAIL_INTERCEPT = 211.5
-_BAND2_HEIGHT = 142
-_BAND2_MARGIN = 45
-_BAND2_SLOPE = _RAIL_SLOPE
-_BAND2_UPPER_INTERCEPT = _RAIL_INTERCEPT - _BAND2_HEIGHT - _BAND2_MARGIN
-_BAND2_LOWER_INTERCEPT = _RAIL_INTERCEPT - _BAND2_MARGIN
-
-# Average log-to-log pitch (px), from hand-marked ground truth on 6.jpg and
-# 10.jpg (72.4px and 74.25px respectively). This press exclusively runs one
-# billet diameter, so the pitch is a fixed constant, not something that
-# needs per-job recalibration. Used for the measurement fallback and as a
-# sanity check on the primary peak-counting method.
+# Average log-to-log pitch (px), from hand-marked ground truth. This press
+# exclusively runs one billet diameter, so the pitch is a fixed constant,
+# not something that needs per-job recalibration.
 _PITCH = 73
 _MAX_CAPACITY = round((_WARP_WIDTH - 2 * _MARGIN) / _PITCH)
 
-# Local-energy (rolling std of the detrended profile) params for locating the
-# pile/background boundary independently of the peak detector.
+# A physically bound, not-yet-loaded bundle always holds this many logs.
+_BUNDLE_SIZE = 4
+
+# Peak-shape params: a real log-to-log edge is a fast rise-then-fall in
+# gradient magnitude (narrow width); background structure (roof beam, fence
+# cross-brace) tends to be a slow, broad rise instead, even when its peak
+# amplitude is comparable to a real edge. Width-capping rejects the broad
+# ones outright; strict/loose prominence separate "definitely real" from
+# "worth a second look during gap-filling."
+_MAX_PEAK_WIDTH = 20
+_STRICT_PROMINENCE = 25
+_LOOSE_PROMINENCE = 10
+
+# Gap-fit tolerances, in px, for deciding whether a gap between two
+# confirmed peaks is "the pitch, maybe with missing logs in between" vs
+# "not on the lattice at all -- probably a staged bundle boundary."
+_TIGHT_FIT_TOL = 10   # this close to a clean multiple of the pitch: trust geometry alone
+_GAP_FIT_TOL = 20      # this close: trust it only with amplitude/confluence corroboration
+_ANCHOR_SLACK_TOL = 30  # extra slack for the link nearest the physical stop -- mechanical
+                        # settling against it can make just that one gap atypical even
+                        # when the rest of the chain fits the pitch perfectly
+_MAX_FILL_K = 5
+
+# A borderline (non-tight) single-pitch connection needs BOTH amplitude and
+# cross-signal support to be trusted -- amplitude alone let a real staged-
+# bundle edge and pure background structure through indistinguishably
+# (confirmed on paired real/fake examples with identical local-energy
+# readings), so a second signal is required, not just a lower bar.
+_AMP_FRACTION = 0.3
+_CONFLUENCE_TOL = 15
+_BRIGHT_MIN_PROMINENCE = 12
+_SAT_MIN_PROMINENCE = 8
+_ENERGY_MIN_PROMINENCE = 4
+
+# Local-energy (rolling std of detrended brightness) window.
 _ENERGY_WIN = 25
-_ENERGY_RATIO = 0.3  # fraction of in-band peak energy that still counts as "real pile"
 
 
 class CountResult:
     def __init__(self, count, method, confidence, detrended, peaks, boundary_x=None,
-                 advisory=None, band="primary", bands_agreed=True):
+                 advisory=None, band="gradient", bands_agreed=True):
         self.count = count
-        self.method = method            # always "peak" -- see advisory below
+        self.method = method
         self.confidence = confidence    # 0-1
         self.detrended = detrended
-        self.peaks = peaks
+        self.peaks = peaks              # absolute column positions (px) in the warped crop
         self.boundary_x = boundary_x
         self.advisory = advisory        # dict or None -- see count_logs()
-        self.band = band                # "primary" or "secondary" -- which band this result came from
-        self.bands_agreed = bands_agreed
+        self.band = band                # descriptive only now (single-pipeline) -- kept for callers/logging
+        self.bands_agreed = bands_agreed  # True for a clean gradient-only read; False if gap-fill/confluence was needed
 
     def __repr__(self):
         flag = f", advisory={self.advisory['measured_estimate']}" if self.advisory else ""
-        return f"CountResult(count={self.count}, confidence={self.confidence:.2f}, band={self.band!r}{flag})"
+        return f"CountResult(count={self.count}, confidence={self.confidence:.2f}{flag})"
 
 
 def warp_log_region(img):
@@ -135,255 +131,230 @@ def warp_log_region(img):
     return cv2.warpPerspective(img, _WARP_MATRIX, (_WARP_WIDTH, _WARP_HEIGHT))
 
 
-def _detrended_profile(img, slope, upper_intercept, lower_intercept):
-    warped = warp_log_region(img)
-    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY).astype(float)
-    h, w = gray.shape
-
+def _band_stat(channel_2d, slope=_BAND1_SLOPE, upper=_BAND1_UPPER_INTERCEPT, lower=_BAND1_LOWER_INTERCEPT):
+    """Mean value of channel_2d within the sampling band, per column."""
+    h, w = channel_2d.shape
     xs = np.arange(_MARGIN, w - _MARGIN)
-    profile = np.empty(len(xs), dtype=float)
+    out = np.empty(len(xs))
     for i, x in enumerate(xs):
-        y0 = max(0, int(round(slope * x + upper_intercept)))
-        y1 = min(h, int(round(slope * x + lower_intercept)))
-        profile[i] = gray[y0:y1, x].mean() if y1 > y0 else 0.0
+        y0 = max(0, int(round(slope * x + upper)))
+        y1 = min(h, int(round(slope * x + lower)))
+        col = channel_2d[y0:y1, x]
+        out[i] = col.mean() if len(col) else 0.0
+    return xs, out
 
+
+def _detrend(profile):
     trend = cv2.GaussianBlur(profile.reshape(1, -1), (0, 0), sigmaX=25).flatten()
     return profile - trend
 
 
 def _local_energy(detrended, win=_ENERGY_WIN):
-    """Rolling std of the detrended profile -- how much local ridge/trough
-    modulation is present at each x, regardless of whether any single bump
-    is prominent enough to register as a find_peaks peak. Real log surface
-    (even under weak, low-contrast lighting) modulates more than flat
-    background (open doorway, roof beam)."""
+    """Rolling std of the detrended brightness profile -- how much local
+    ridge/trough modulation is present at each x, regardless of whether any
+    single bump is prominent enough to register as a find_peaks peak."""
     n = len(detrended)
     return np.array([detrended[max(0, i - win):i + win].std() for i in range(n)])
 
 
-def _find_pile_boundary(energy):
-    """Walk in from the anchored right edge and find the leftmost point that's
-    still part of a contiguous high-energy (real pile) run, using a threshold
-    relative to this frame's own peak energy -- so it works whether the frame
-    is high-contrast or dim. Energy naturally dips at every log-to-log trough
-    even within real pile, so brief below-threshold dips (shorter than a
-    pitch) are bridged over first -- only a sustained drop counts as reaching
-    the background."""
-    threshold = _ENERGY_RATIO * energy.max()
-    above = energy > threshold
+def _signal_profiles(img):
+    """Computes all four signals used for counting, aligned on the same xs."""
+    warped = warp_log_region(img)
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY).astype(float)
+    sat = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)[:, :, 1].astype(float)
 
-    # bridge gaps shorter than ~half a pitch so normal inter-log troughs
-    # don't get mistaken for the background boundary
-    min_gap = int(_PITCH * 0.6)
-    i = 0
-    while i < len(above):
-        if not above[i]:
-            j = i
-            while j < len(above) and not above[j]:
-                j += 1
-            if j - i < min_gap and i > 0 and j < len(above):
-                above[i:j] = True
-            i = j
-        else:
-            i += 1
+    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    grad_mag = np.sqrt(sobelx ** 2 + sobely ** 2)
 
-    i = len(above) - 1
-    while i > 0 and above[i]:
-        i -= 1
-    return i + 1
+    xs, gradient = _band_stat(grad_mag)
+    _, brightness = _band_stat(gray)
+    _, sat_mean = _band_stat(sat)
 
-
-def _gap_consistency(peaks):
-    """Mean absolute deviation of a peak list's gaps from the known fixed
-    pitch -- lower means the final peaks are more evenly, plausibly spaced
-    (real log ridges), higher means noisier/more irregular (more likely
-    contaminated by background structure or a fragmented signal). Used to
-    arbitrate between the two bands when they disagree on the count."""
-    if len(peaks) < 2:
-        return float("inf")
-    gaps = np.diff(peaks)
-    return float(np.mean(np.abs(gaps - _PITCH)))
-
-
-def _analyze_band(img, slope, upper_intercept, lower_intercept):
-    """Runs the full single-band pipeline (detrend, peak-detect, merge,
-    trim, energy/boundary, advisory check) and returns a dict with
-    everything count_logs needs to build a CountResult or compare against
-    the other band."""
-    detrended = _detrended_profile(img, slope, upper_intercept, lower_intercept)
-    peaks, _ = find_peaks(detrended, prominence=3, distance=15)
-    peaks = _merge_close_peaks(peaks)
-    peaks = _trim_to_pile(peaks)
-
+    detrended = _detrend(brightness)
+    sat_detrended = _detrend(sat_mean)
     energy = _local_energy(detrended)
-    boundary_x = _find_pile_boundary(energy)
-    leftmost_peak = peaks[0] if len(peaks) else len(detrended)
 
-    capacity_ratio = len(peaks) / _MAX_CAPACITY
-    confidence = min(1.0, 0.6 + 0.4 * capacity_ratio)
+    return warped, xs, gradient, detrended, sat_detrended, energy
 
-    # if the energy-based boundary sits well left of the leftmost claimed
-    # peak, there's unclaimed signal the peak detector didn't count --
-    # flagged for review, not acted on (see count_logs docstring)
-    missed_span = leftmost_peak - boundary_x
-    advisory = None
-    if missed_span > 0.5 * _PITCH:
-        span = (len(detrended) - 1) - boundary_x
-        measured_estimate = max(1, round(span / _PITCH))
-        advisory = {
-            "reason": "possible missed log(s) left of leftmost detected peak",
-            "measured_estimate": measured_estimate,
-            "boundary_x": boundary_x,
-        }
-        confidence = min(confidence, 0.3)
 
-    return {
-        "count": len(peaks),
-        "detrended": detrended,
-        "peaks": peaks,
-        "boundary_x": boundary_x,
-        "advisory": advisory,
-        "confidence": confidence,
-    }
+def _sharp_peaks(profile, min_prominence):
+    """Peaks that rise and fall fast (narrow width) -- rejects the slow,
+    broad bumps background structure produces even at comparable amplitude."""
+    idx, props = find_peaks(profile, prominence=min_prominence, width=(None, _MAX_PEAK_WIDTH))
+    return idx, props["prominences"]
+
+
+def _first_per_pitch_window(peaks, proms, window_ratio=0.6):
+    """Collapses spurious double-peaks (e.g. rim highlights on one wide log)
+    within less than a pitch of each other, keeping the strongest of the
+    group rather than the first -- matters once amplitude is used for
+    anything downstream, since a weak-but-earlier candidate must not
+    suppress a much stronger nearby one."""
+    if len(peaks) == 0:
+        return peaks, proms
+    window = window_ratio * _PITCH
+    groups = [[0]]
+    for i in range(1, len(peaks)):
+        if peaks[i] - peaks[groups[-1][-1]] < window:
+            groups[-1].append(i)
+        else:
+            groups.append([i])
+    kept = [max(g, key=lambda i: proms[i]) for g in groups]
+    return peaks[kept], proms[kept]
+
+
+def _nearest_within(candidates_x, target, tol):
+    hits = [x for x in candidates_x if abs(x - target) <= tol]
+    return min(hits, key=lambda x: abs(x - target)) if hits else None
 
 
 def count_logs(img):
-    """Return a CountResult for a raw camera frame, from one of two
-    independent sampling bands within the same warped crop (2026-08-13).
+    """Return a CountResult for a raw camera frame.
 
-    Band 1 ("primary") runs parallel to the safety fence and was the sole
-    method through 2026-08-12 (0.68 mean abs error / 18/38 exact on the
-    38-photo labeled set). It sometimes samples real background structure
-    (a roof/wall panel, cross-brace truss) that coincidentally echoes the
-    log pitch closely enough to fool peak detection entirely on some
-    frames. Band 2 ("secondary") is anchored near the fence's top rail
-    (see `_BAND2_*` above) -- it avoids that specific failure but has its
-    own (different) noisy-frame failure mode.
+    Counts individual logs from sharp edges in Sobel gradient magnitude
+    within the fence-parallel sampling band -- a real log-to-log edge is a
+    fast rise-then-fall (narrow width); background structure (roof beam,
+    fence cross-brace) tends toward a slower, broader rise even at
+    comparable peak height, so width-capping `find_peaks` separates the two
+    far more reliably than brightness/amplitude alone did.
 
-    Both run every time. If they agree on the count, that's a real
-    cross-check and confidence uses the normal capacity-based formula. If
-    they disagree, `_gap_consistency` picks whichever band's final peaks are
-    more evenly spaced at the known pitch, and confidence is capped at 0.75
-    -- disagreement between two independent methods is inherently less
-    certain, even once one is chosen, and 0.75 sits below the 0.85 bar
-    table_state.py requires for camera-consensus re-anchoring, so a
-    disagreeing frame can't drive that on its own.
+    The walk that turns raw peaks into a count starts from the rightmost
+    (anchored against the physical stop, always trusted) and works left:
+    - A gap that's a clean multiple of the pitch gets any missing interior
+      slots filled -- first from a second, lower-threshold gradient pass,
+      falling back to a detrended-brightness peak at the same expected
+      position when gradient shows nothing there at all (confirmed on real
+      frames: gradient depends on harsh directional shadow that diffuse
+      lighting doesn't always provide, even when the log is really there).
+    - A borderline-fit gap (not a clean multiple, not clearly off-lattice
+      either) is only trusted if the far peak also shows a matching feature
+      in brightness, saturation, AND local energy -- amplitude alone proved
+      exploitable: a confirmed-real staged-bundle edge and a confirmed-fake
+      background edge produced identical local-energy readings in testing.
+    - The single link nearest the anchor gets extra gap tolerance before the
+      walk gives up, since mechanical settling against the stop can make
+      just that one connection atypical even when the rest of the chain
+      fits the pitch perfectly.
+    - Whatever's left unclaimed past a broken link is a possible staged
+      bundle (always exactly 4 logs when real, physically bound together
+      until its banding is cut) -- surfaced as `result.advisory`, not
+      auto-added to `count`, since real bundle edges and spurious
+      background edges were found to be indistinguishable by energy,
+      prominence, or gap-fit alone.
+    """
+    warped, xs, gradient, detrended, sat_detrended, energy = _signal_profiles(img)
 
-    There's also a pixel-measurement cross-check within each band (locate
-    the pile/background boundary via local signal energy, divide the
-    occupied span by the known average log pitch) that was originally wired
-    up as an *overriding* fallback for when peak-detection looked like it
-    missed something. That got demoted to advisory-only (2026-08-12) after
-    a live frame showed the energy-boundary check can't reliably tell a
-    real missed log apart from background structure that happens to echo
-    the same ~73px pitch -- it silently turned a correct count of 6 into a
-    wrong 7. The logic is kept here, surfaced as `result.advisory` rather
-    than acting on it, in case a more robust distinguishing signal makes it
-    trustworthy enough to reinstate."""
-    band1 = _analyze_band(img, _BAND1_SLOPE, _BAND1_UPPER_INTERCEPT, _BAND1_LOWER_INTERCEPT)
-    band2 = _analyze_band(img, _BAND2_SLOPE, _BAND2_UPPER_INTERCEPT, _BAND2_LOWER_INTERCEPT)
+    strict_idx, strict_prom = _sharp_peaks(gradient, _STRICT_PROMINENCE)
+    confirmed_idx, confirmed_prom = _first_per_pitch_window(strict_idx, strict_prom)
+    confirmed_x = xs[confirmed_idx]
 
-    if band1["count"] == band2["count"]:
-        winner, name, agreed = band1, "primary", True
-    else:
-        c1 = _gap_consistency(band1["peaks"])
-        c2 = _gap_consistency(band2["peaks"])
-        if c2 < c1:
-            winner, name, agreed = band2, "secondary", False
-        else:
-            winner, name, agreed = band1, "primary", False
+    loose_idx, _ = _sharp_peaks(gradient, _LOOSE_PROMINENCE)
+    loose_x = xs[loose_idx]
 
-    confidence = winner["confidence"] if agreed else min(winner["confidence"], 0.75)
+    bright_idx, _ = find_peaks(detrended, prominence=_BRIGHT_MIN_PROMINENCE, distance=15)
+    bright_x = xs[bright_idx]
+    sat_idx, _ = find_peaks(sat_detrended, prominence=_SAT_MIN_PROMINENCE, distance=15)
+    sat_x = xs[sat_idx]
+    energy_idx, _ = find_peaks(energy, prominence=_ENERGY_MIN_PROMINENCE, distance=15)
+    energy_x = xs[energy_idx]
+
+    def confluence_ok(x, min_hits=2):
+        hits = sum(_nearest_within(sig, x, _CONFLUENCE_TOL) is not None
+                   for sig in (bright_x, sat_x, energy_x))
+        return hits >= min_hits
+
+    if len(confirmed_x) == 0:
+        return CountResult(0, "gradient_peak", 0.0, gradient, [], band="gradient", bands_agreed=False)
+
+    order = np.argsort(confirmed_x)
+    confirmed_x = confirmed_x[order]
+    confirmed_prom = confirmed_prom[order]
+
+    pile = [confirmed_x[-1]]
+    pile_prom = [confirmed_prom[-1]]
+    used_fallback = False
+    i = len(confirmed_x) - 1
+    is_first_link = True
+    while i > 0:
+        b, a = confirmed_x[i], confirmed_x[i - 1]
+        a_prom = confirmed_prom[i - 1]
+        gap = b - a
+        k = max(1, round(gap / _PITCH))
+        residual = abs(gap - k * _PITCH)
+        reference = float(np.median(pile_prom))
+        tight_fit = residual <= _TIGHT_FIT_TOL
+        borderline_ok = a_prom >= _AMP_FRACTION * reference and confluence_ok(a)
+        tol = _ANCHOR_SLACK_TOL if is_first_link else _GAP_FIT_TOL
+
+        if residual <= tol and k <= _MAX_FILL_K and (tight_fit or borderline_ok or is_first_link):
+            for m in range(1, k):
+                expected = b - (k - m) * _PITCH  # anchored from the trusted (right) side
+                cand = _nearest_within(loose_x, expected, _GAP_FIT_TOL)
+                if cand is None:
+                    cand = _nearest_within(bright_x, expected, _GAP_FIT_TOL)
+                    if cand is not None:
+                        used_fallback = True
+                if cand is not None:
+                    pile.insert(0, cand)
+                    pile_prom.insert(0, reference)
+            pile.insert(0, a)
+            pile_prom.insert(0, a_prom)
+            if not tight_fit:
+                used_fallback = True
+            i -= 1
+            is_first_link = False
+            continue
+        break
+
+    bundle_peaks = list(confirmed_x[:i])
+
+    count = len(pile)
+    capacity_ratio = count / _MAX_CAPACITY
+    confidence = min(1.0, 0.6 + 0.4 * capacity_ratio)
+
+    advisory = None
+    if bundle_peaks:
+        advisory = {
+            "reason": "possible staged bundle before the counted pile (unconfirmed)",
+            "measured_estimate": count + _BUNDLE_SIZE,
+            "boundary_x": bundle_peaks[-1],
+        }
+        confidence = min(confidence, 0.3)
+    elif used_fallback:
+        confidence = min(confidence, 0.75)
 
     return CountResult(
-        winner["count"], "peak", confidence, winner["detrended"], winner["peaks"],
-        winner["boundary_x"], winner["advisory"], band=name, bands_agreed=agreed,
+        count, "gradient_peak", confidence, gradient, pile,
+        boundary_x=pile[0] if pile else None, advisory=advisory,
+        band="gradient", bands_agreed=not (bundle_peaks or used_fallback),
     )
 
 
 def annotate(img, result):
     """Warped crop with the detected peak positions (and, if present, the
-    advisory boundary) drawn on it -- a visual pair to the raw snapshot so
-    what the algorithm is "seeing" can be audited frame-by-frame rather than
-    inferred from a count and a confidence number alone."""
+    advisory bundle boundary) drawn on it -- a visual pair to the raw
+    snapshot so what the algorithm is "seeing" can be audited frame-by-frame
+    rather than inferred from a count and a confidence number alone."""
     warped = warp_log_region(img)
     vis = warped.copy()
 
     for p in result.peaks:
-        x = int(p) + _MARGIN
+        x = int(p)
         cv2.line(vis, (x, 0), (x, vis.shape[0]), (0, 0, 255), 2)
 
     if result.advisory:
-        x = int(result.advisory["boundary_x"]) + _MARGIN
+        x = int(result.advisory["boundary_x"])
         cv2.line(vis, (x, 0), (x, vis.shape[0]), (0, 165, 255), 2)
 
-    agree_flag = "" if result.bands_agreed else "  (bands disagreed)"
-    label = f"count={result.count}  confidence={result.confidence:.2f}  band={result.band}{agree_flag}"
+    agree_flag = "" if result.bands_agreed else "  (fallback used)"
+    label = f"count={result.count}  confidence={result.confidence:.2f}{agree_flag}"
     cv2.putText(vis, label, (10, vis.shape[0] - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
     if result.advisory:
         adv_label = f"ADVISORY: alt estimate={result.advisory['measured_estimate']}"
         cv2.putText(vis, adv_label, (10, vis.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2, cv2.LINE_AA)
 
     return vis
-
-
-def _merge_close_peaks(peaks, ratio=0.6):
-    """Collapse spurious double-peaks (e.g. the twin highlight rims a single
-    large-diameter log's curved surface can produce under backlighting) into
-    one. Real log-to-log spacing is fairly uniform, so any gap much smaller
-    than the known fixed pitch is almost certainly a split log rather than a
-    genuinely separate one.
-
-    Threshold used to be relative to this frame's own median gap rather than
-    the known-constant pitch -- that self-referential estimate could get
-    dragged down by the very double-peaks it was supposed to catch (a run of
-    several small split-log gaps pulls the median down enough that those
-    same gaps stop looking anomalous), letting the split survive uncaught.
-    Anchoring to the fixed `_PITCH` avoids that."""
-    peaks = np.asarray(peaks)
-    threshold = ratio * _PITCH
-    while len(peaks) >= 3:
-        merged = [peaks[0]]
-        changed = False
-        for p in peaks[1:]:
-            if p - merged[-1] < threshold:
-                merged[-1] = (merged[-1] + p) // 2
-                changed = True
-            else:
-                merged.append(p)
-        peaks = np.array(merged)
-        if not changed:
-            break
-    return peaks
-
-
-def _trim_to_pile(peaks, tolerance=0.35):
-    """Logs are pushed against a stop on the near (right) side of the crop
-    and stack toward the far (left) side, so a partially-filled rack leaves
-    empty space -- and background clutter -- on the left, not gaps in the
-    middle. Real log-to-log spacing is regular; once we walk leftward from
-    the anchored right edge and hit a gap that breaks from the known fixed
-    pitch, everything further left is background, not logs, so drop it.
-
-    Pitch used to be estimated from the two gaps nearest the anchor and then
-    left to drift as the walk continued -- fragile, because if a double-peak
-    survived right at the anchor (see _merge_close_peaks), that bad estimate
-    became the reference for the whole walk and rejected real peaks further
-    out (observed: a frame with 13 real candidate peaks got trimmed down to
-    3). The pitch is a known physical constant here (fixed billet diameter),
-    so there's no reason to re-derive or drift it per frame."""
-    peaks = np.asarray(peaks)
-    if len(peaks) < 3:
-        return peaks
-    gaps = np.diff(peaks)  # gaps[i] is the gap left of peaks[i+1]
-
-    keep_from = len(peaks) - 1  # rightmost peak always kept
-    for i in range(len(gaps) - 1, -1, -1):
-        if abs(gaps[i] - _PITCH) <= tolerance * _PITCH:
-            keep_from = i
-        else:
-            break
-    return peaks[keep_from:]
 
 
 if __name__ == "__main__":
@@ -393,8 +364,8 @@ if __name__ == "__main__":
             print(f"{path}: could not read")
             continue
         result = count_logs(img)
-        agree_flag = "" if result.bands_agreed else " DISAGREE"
-        line = f"{path}: {result.count}  [confidence={result.confidence:.2f} band={result.band}{agree_flag}]"
+        agree_flag = "" if result.bands_agreed else " (fallback used)"
+        line = f"{path}: {result.count}  [confidence={result.confidence:.2f}{agree_flag}]"
         if result.advisory:
             line += f"  ADVISORY: {result.advisory['reason']} (alt estimate={result.advisory['measured_estimate']})"
         print(line)
