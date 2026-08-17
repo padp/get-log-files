@@ -260,6 +260,11 @@ def predict_billets_until_alloy_change(
         upcoming jobs, until the Excel total catches up to what the PLC
         says is actually being run.
 
+    Also returns "breakdown": the actual list of job rows summed to reach
+    billetsRemaining/jobsRemaining (current job first, then each upcoming
+    job in schedule order) -- the proof behind the projected time, for
+    display alongside it rather than asking anyone to just trust the total.
+
     Walks the schedule forward from the current job, summing scheduled
     billets for this job (minus what's already run) plus every subsequent
     non-consolidated job, stopping only at the next explicit "ALLOY CHANGE"
@@ -294,19 +299,29 @@ def predict_billets_until_alloy_change(
     if current_index is None:
         return None  # can't confidently identify the current job -- can't predict
 
-    current_alloy = entries[current_index]["alloy"]
+    current_entry = entries[current_index]
+    current_alloy = current_entry["alloy"]
 
     # Trust the PLC's own total for the current run over the (possibly
     # stale, pre-consolidation) Excel figure for just this one job line.
     remaining_billets = max(current_scheduled_billets - current_billet_number, 0)
     jobs_remaining = 0
 
+    breakdown = [{
+        "job": current_entry["job"],
+        "die": current_entry["die"],
+        "dieCopy": current_entry["suffix"],
+        "part": current_entry["part"],
+        "billets": remaining_billets,
+        "current": True,
+    }]
+
     # Jobs that haven't started yet get re-listed across multiple shift
     # files (confirmed live: a job still in progress on 1st shift was also
     # listed, blank, on 2nd shift's file, presumably so the next shift's
     # operator can see it's still queued). Each Job # is only ever counted
     # once across the whole walk, however many times it's re-listed.
-    seen_jobs = {entries[current_index]["job"]}
+    seen_jobs = {current_entry["job"]}
 
     index = current_index + 1
 
@@ -337,12 +352,21 @@ def predict_billets_until_alloy_change(
                     "billetsRemaining": remaining_billets,
                     "jobsRemaining": jobs_remaining,
                     "alloy": current_alloy,
+                    "breakdown": breakdown,
                 }
 
             if entry["job"] not in seen_jobs:
                 seen_jobs.add(entry["job"])
                 remaining_billets += entry["scheduledBillets"]
                 jobs_remaining += 1
+                breakdown.append({
+                    "job": entry["job"],
+                    "die": entry["die"],
+                    "dieCopy": entry["suffix"],
+                    "part": entry["part"],
+                    "billets": entry["scheduledBillets"],
+                    "current": False,
+                })
 
             index += 1
 
@@ -363,4 +387,5 @@ def predict_billets_until_alloy_change(
         "billetsRemaining": remaining_billets,
         "jobsRemaining": jobs_remaining,
         "alloy": current_alloy,
+        "breakdown": breakdown,
     }

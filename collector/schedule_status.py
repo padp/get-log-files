@@ -77,6 +77,7 @@ def update_schedule_status():
             "billetsRemaining": prediction["billetsRemaining"],
             "jobsRemaining": prediction["jobsRemaining"],
             "alloy": prediction["alloy"],
+            "breakdown": prediction["breakdown"],
             "etaSeconds": eta_seconds,
             "updatedAt": datetime.utcnow(),
         },
