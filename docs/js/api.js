@@ -122,6 +122,37 @@ export async function fetchTableStateReconciliation(hours = null) {
   return JSON.parse(text);
 }
 
+// Candidate at-risk serials from PAD-Log Bay, oldest-staged first -- only
+// meaningful to fetch when fetchTableStateReconciliation()'s gapAlert is
+// true, see renderTableState.js.
+export async function fetchGapCandidates(limit = 20) {
+  const response = await fetch(`${API_BASE}/api/table-state/gap-candidates?limit=${limit}`);
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  return JSON.parse(text);
+}
+
+// Manual per-event drill-down -- Plex moves in a window around one
+// delivery event's recordedAt, for a human to eyeball. Not an assertion
+// that these ARE the matching serials (see api/app.py's docstring on why
+// per-event timing is unreliable) -- just what Plex activity happened
+// nearby, same neutral framing as fetchGapCandidates.
+export async function fetchNearbyMoves(time, { beforeMinutes = 60, afterMinutes = 15 } = {}) {
+  const params = new URLSearchParams({ time, beforeMinutes, afterMinutes });
+  const response = await fetch(`${API_BASE}/api/table-state/nearby-moves?${params}`);
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  return JSON.parse(text);
+}
+
 export function tableStateImageUrl() {
   // cache-busted so the <img> actually refetches each time the panel opens
   // rather than showing a stale browser-cached photo

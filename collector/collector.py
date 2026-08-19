@@ -3,7 +3,7 @@ from datetime import datetime
 import requests
 from config import CHECK_INTERVAL
 from campaigns import process_campaign
-from inventory import upsert_inventory
+from inventory import upsert_inventory, poll_log_bay_inventory
 from plex import get_inventory_rows
 from history import process_history_queue, backfill_start_weight
 from billet_log import record_billet_state
@@ -37,6 +37,8 @@ def main():
             print(f"[STATUS] Fetched {len(rows)} inventory rows")
 
             upsert_inventory(rows, campaign)
+
+            poll_log_bay_inventory()
 
             process_history_queue()
 

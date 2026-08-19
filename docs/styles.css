@@ -307,6 +307,26 @@ body {
   margin-top: 2px;
 }
 
+/* .load-event-row is now a <details> (was a <div>) so each delivery can
+   expand into its nearby-Plex-activity drill-down -- the padding/border
+   rules above still apply unchanged, this just adds the interactive bits. */
+.load-event-row summary {
+  cursor: pointer;
+  list-style-position: outside;
+}
+
+.nearby-moves {
+  margin-top: 6px;
+  padding-left: 14px;
+  border-left: 2px solid var(--color-border);
+}
+
+.nearby-move-row {
+  font-size: 12px;
+  padding: 4px 0;
+  color: var(--color-text-muted);
+}
+
 .reconciliation-summary {
   margin-top: 10px;
   padding: 8px 10px;
@@ -322,6 +342,30 @@ body {
 
 .reconciliation-bad {
   color: var(--color-danger);
+}
+
+/* Only ever populated (via innerHTML) when gapAlert is true -- :empty
+   collapses it the rest of the time instead of showing a padded, empty
+   box. A sustained gap is a more urgent tier than the ok/bad
+   reconciliation summary above it, so it gets its own block rather than
+   being folded into that span. */
+.gap-alert-banner {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.gap-alert-banner:empty {
+  display: none;
+}
+
+#gapCandidatesList {
+  max-height: 240px; /* same scroll-cap as #loadEventsList */
+  overflow-y: auto;
 }
 
 /* ------------------------------------------------------------ */

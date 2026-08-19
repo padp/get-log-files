@@ -1,7 +1,19 @@
-import { fetchTableState, fetchTableStateEvents, fetchTableStateReconciliation, tableStateImageUrl, submitTableStateOverride } from "./api.js";
+import { fetchTableState, fetchTableStateEvents, fetchTableStateReconciliation, fetchGapCandidates, fetchNearbyMoves, tableStateImageUrl, submitTableStateOverride } from "./api.js";
 import { getDate } from "./dateUtils.js";
 
 const STALE_THRESHOLD_MS = 5 * 60 * 1000; // collector polls every ~60s; 5x that is a generous "still alive" window
+
+// updateTableState() and updateReconciliation() both run every 30s cycle
+// and both have their own reason to flag #tableStateCard as alerting
+// (staleness, gap-open-too-long). Each independently calling
+// classList.toggle("status-alert", ...) would let whichever one runs last
+// silently clobber the other's decision -- this shared state + single
+// toggle point is what keeps both reasons visible at once.
+const alertReasons = { stale: false, gapAlert: false };
+function refreshStatusAlert() {
+  const card = document.getElementById("tableStateCard");
+  card.classList.toggle("status-alert", alertReasons.stale || alertReasons.gapAlert);
+}
 
 //--------------------------------------------------
 // Supervisory override -- wired once at load, since the <details>/<form>
@@ -46,8 +58,41 @@ supervisoryForm.addEventListener("submit", async e => {
   }
 });
 
+//--------------------------------------------------
+// Per-delivery drill-down -- wired once here (not inside updateLoadEvents,
+// which replaces #loadEventsList's children every poll cycle whenever the
+// event set actually changes) via delegation on the parent, which persists
+// across those innerHTML swaps. "toggle" doesn't bubble, so this needs
+// capture:true to catch it on the way down from whichever <details> the
+// user actually opened.
+//--------------------------------------------------
+document.getElementById("loadEventsList").addEventListener("toggle", async (e) => {
+  const details = e.target;
+  if (!details.matches || !details.matches(".load-event-row") || !details.open) return;
+
+  const container = details.querySelector(".nearby-moves");
+  if (container.dataset.loaded) return; // fetched once already; don't re-fetch on every re-open
+
+  try {
+    const { moves } = await fetchNearbyMoves(details.dataset.recordedAt);
+    container.dataset.loaded = "true";
+
+    if (!moves || moves.length === 0) {
+      container.innerHTML = "<i>No Plex moves found nearby.</i>";
+      return;
+    }
+
+    container.innerHTML = moves.map(m => `
+      <div class="nearby-move-row">
+        <b>${m.serialNo}</b> (${m.partNo}) &mdash; moved ${new Date(getDate(m.timeMoved)).toLocaleString()}
+      </div>
+    `).join("");
+  } catch (err) {
+    container.innerHTML = `<i>Failed to load: ${err.message}</i>`;
+  }
+}, true);
+
 export async function updateTableState() {
-  const card = document.getElementById("tableStateCard");
   const body = document.getElementById("tableStateBody");
 
   try {
@@ -56,7 +101,8 @@ export async function updateTableState() {
     if (!status || status.confirmedCount == null) {
       const html = "<i>No confirmed count yet.</i>";
       if (body.innerHTML !== html) body.innerHTML = html;
-      card.classList.remove("status-alert");
+      alertReasons.stale = false;
+      refreshStatusAlert();
       return;
     }
 
@@ -81,7 +127,8 @@ export async function updateTableState() {
     `;
 
     if (body.innerHTML !== html) body.innerHTML = html;
-    card.classList.toggle("status-alert", isStale || !hasUpdatedAt);
+    alertReasons.stale = isStale || !hasUpdatedAt;
+    refreshStatusAlert();
   } catch (err) {
     console.error("Table state check failed:", err);
   }
@@ -105,6 +152,7 @@ const REASON_LABEL = {
 // handler) -- a real, if coarser, traceability signal.
 export async function updateReconciliation() {
   const el = document.getElementById("reconciliationSummary");
+  const banner = document.getElementById("gapAlertBanner");
 
   try {
     const r = await fetchTableStateReconciliation();
@@ -115,8 +163,61 @@ export async function updateReconciliation() {
       : `<span class="reconciliation-ok">&#10003; ${r.delivered} delivered ${windowLabel}, ${r.moved} moved in Plex -- reconciled</span>`;
 
     if (el.innerHTML !== html) el.innerHTML = html;
+
+    // A short-lived gap (camera consensus catching up to a Plex move that
+    // already happened) is normal and doesn't get a banner -- gapAlert
+    // only turns true once the gap has stayed open past
+    // reconciliation.GAP_ALERT_THRESHOLD_MINUTES, which is the real signal
+    // something's actually wrong rather than just still resolving.
+    const bannerHtml = r.gapAlert
+      ? `&#9888; Gap open for ${Math.round(r.gapOpenMinutes)} min (since ${new Date(getDate(r.gapOpenSince)).toLocaleTimeString()}) -- check Log Bay candidates below`
+      : "";
+    if (banner.innerHTML !== bannerHtml) banner.innerHTML = bannerHtml;
+
+    alertReasons.gapAlert = r.gapAlert;
+    refreshStatusAlert();
+
+    await updateGapCandidates(r.gapAlert);
   } catch (err) {
     console.error("Reconciliation check failed:", err);
+  }
+}
+
+async function updateGapCandidates(gapAlert) {
+  const section = document.getElementById("gapCandidatesSection");
+  const list = document.getElementById("gapCandidatesList");
+
+  // Only worth the extra Mongo query when there's actually an alert to act
+  // on -- no point fetching/rendering a candidate list every 30s cycle
+  // regardless of state.
+  if (!gapAlert) {
+    section.hidden = true;
+    return;
+  }
+
+  try {
+    const { candidates } = await fetchGapCandidates();
+    section.hidden = false;
+
+    if (!candidates || candidates.length === 0) {
+      const html = "<i>No serials currently staged at Log Bay.</i>";
+      if (list.innerHTML !== html) list.innerHTML = html;
+      return;
+    }
+
+    const html = candidates.map(c => {
+      const since = new Date(getDate(c.firstSeenAt));
+      return `
+        <div class="load-event-row">
+          <b>${c.serialNo}</b> (${c.partNo})
+          <div class="load-event-time">at Log Bay since ${since.toLocaleString()}</div>
+        </div>
+      `;
+    }).join("");
+
+    if (list.innerHTML !== html) list.innerHTML = html;
+  } catch (err) {
+    console.error("Gap candidates check failed:", err);
   }
 }
 
@@ -136,12 +237,18 @@ export async function updateLoadEvents() {
       const when = new Date(getDate(ev.recordedAt));
       const label = REASON_LABEL[ev.reason] || ev.reason || "unknown";
 
+      // data-recorded-at drives the lazy nearby-moves fetch below -- an
+      // ISO string the API can parse directly, computed once here rather
+      // than re-deriving it from the row's displayed text later.
       return `
-        <div class="load-event-row">
-          <span class="load-event-delta">+${ev.delta}</span>
-          <b>${ev.newCount} on table</b> (${label})
-          <div class="load-event-time">${when.toLocaleString()}</div>
-        </div>
+        <details class="load-event-row" data-recorded-at="${when.toISOString()}">
+          <summary>
+            <span class="load-event-delta">+${ev.delta}</span>
+            <b>${ev.newCount} on table</b> (${label})
+            <div class="load-event-time">${when.toLocaleString()}</div>
+          </summary>
+          <div class="nearby-moves"><i>Click to check nearby Plex activity...</i></div>
+        </details>
       `;
     }).join("");
 

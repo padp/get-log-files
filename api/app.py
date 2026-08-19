@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import os
 
+from reconciliation import get_gap_status
+
 # The plant (Paducah, KY) runs on Central time -- shift boundaries below are
 # plant-local, not UTC. This API runs on Render, whose server clock is not
 # guaranteed to be plant-local (unlike the collector, which runs on-site and
@@ -54,6 +56,8 @@ table_events_collection = db["table_events"]
 
 table_state_image_collection = db["table_state_image"]
 
+log_bay_collection = db["log_bay_inventory"]
+
 # No index existed on timeMoved before this -- every sort/filter on it
 # (the inventory list, the dashboard shift query, scanner-health's
 # most-recent lookup) was a full collection scan, and the collection only
@@ -66,6 +70,13 @@ try:
     lf_collection.create_index([("timeMoved", -1)])
 except Exception as e:
     print(f"[STARTUP] Could not ensure timeMoved index (will retry next deploy/restart): {e}")
+
+# Serves /api/table-state/gap-candidates' exact filter+sort shape
+# (removedAt: None, sorted firstSeenAt ascending) directly.
+try:
+    log_bay_collection.create_index([("removedAt", 1), ("firstSeenAt", 1)])
+except Exception as e:
+    print(f"[STARTUP] Could not ensure log_bay_inventory index (will retry next deploy/restart): {e}")
 
 # Shared supervisory-override credential, not a real per-user login --
 # matches this app's existing security posture (nothing else here is
@@ -381,12 +392,121 @@ def table_state_reconciliation():
 
     moved = lf_collection.count_documents({"timeMoved": {"$gte": since}})
 
+    gap_status = get_gap_status(lf_collection, table_events_collection)
+
     return dumps({
         "sinceHours": hours,
         "since": since,
         "delivered": delivered,
         "moved": moved,
         "netDifference": delivered - moved,
+        "gapOpenSince": gap_status["gapOpenSince"],
+        "gapOpenMinutes": gap_status["gapOpenMinutes"],
+        "gapAlert": gap_status["gapAlert"],
+    })
+
+
+@app.route("/api/table-state/gap-candidates", methods=["GET"])
+def table_state_gap_candidates():
+    """
+    When /api/table-state/reconciliation's gapAlert is true, this is the
+    candidate list a material handler can actually check instead of a
+    blind physical inventory: everything currently believed to still be
+    sitting at PAD-Log Bay (collector/inventory.py's poll_log_bay_inventory,
+    same two-consecutive-miss removedAt confirmation as the main
+    PAD-Extrusion SHARED inventory), oldest first by firstSeenAt -- the
+    ones that have been staged longest are the most likely to be the ones
+    that got physically run without their Plex move ever catching up.
+
+    Deliberately NOT filtered to the active job's alloy/part -- there's no
+    confirmed mapping in this codebase from schedule_status's fields
+    (profile/dieCopy/alloy, raw press HMI values) to Plex's own PartNo
+    values, so hard-filtering on a guessed mapping risks silently hiding
+    the real candidate. activeJob is returned alongside the full list
+    instead, for a human to cross-check by eye.
+    """
+
+    limit = min(int(request.args.get("limit", 20) or 20), 100)
+
+    candidates = list(
+        log_bay_collection.find(
+            {"removedAt": None},
+            {"SerialNo": 1, "PartNo": 1, "Location": 1, "firstSeenAt": 1, "lastSeen": 1},
+        ).sort("firstSeenAt", 1).limit(limit)
+    )
+
+    active_job_doc = schedule_status_collection.find_one({"_id": "current"})
+    active_job = None
+    if active_job_doc:
+        active_job = {
+            "alloy": active_job_doc.get("alloy"),
+            "profile": active_job_doc.get("profile"),
+            "dieCopy": active_job_doc.get("dieCopy"),
+        }
+
+    return dumps({
+        "generatedAt": datetime.utcnow(),
+        "activeJob": active_job,
+        "candidates": [
+            {
+                "serialNo": c.get("SerialNo"),
+                "partNo": c.get("PartNo"),
+                "location": c.get("Location"),
+                "firstSeenAt": c.get("firstSeenAt"),
+                "lastSeen": c.get("lastSeen"),
+            }
+            for c in candidates
+        ],
+    })
+
+
+@app.route("/api/table-state/nearby-moves", methods=["GET"])
+def table_state_nearby_moves():
+    """
+    Manual per-event drill-down: given one delivery event's recordedAt,
+    what Plex moves (log_files.timeMoved) happened in a window around it?
+
+    Deliberately NOT an automated match -- /api/table-state/events'
+    docstring already covers why comparing individual event timing is
+    unreliable (a delivery's recordedAt is when consensus finally agreed,
+    not when the log arrived, and that lag is unpredictable). This endpoint
+    exists for a human to look at, not for the system to assert "these are
+    the serials" -- it returns everything Plex-side in the window and lets
+    a person judge, the same reasoning that keeps /api/table-state/gap-candidates
+    from hard-filtering by job. Window defaults wide and skewed backward
+    (beforeMinutes > afterMinutes) since the real Plex move is more likely
+    to have happened before a laggy consensus timestamp than after it.
+    """
+
+    time_param = request.args.get("time")
+    if not time_param:
+        return {"error": "time is required (ISO 8601)"}, 400
+
+    try:
+        center = datetime.fromisoformat(time_param.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return {"error": "time must be a valid ISO 8601 timestamp"}, 400
+
+    before_minutes = min(float(request.args.get("beforeMinutes", 60)), 24 * 60)
+    after_minutes = min(float(request.args.get("afterMinutes", 15)), 24 * 60)
+
+    window_start = center - timedelta(minutes=before_minutes)
+    window_end = center + timedelta(minutes=after_minutes)
+
+    docs = list(
+        lf_collection.find(
+            {"timeMoved": {"$gte": window_start, "$lte": window_end}},
+            {"SerialNo": 1, "PartNo": 1, "timeMoved": 1},
+        ).sort("timeMoved", 1)
+    )
+
+    return dumps({
+        "windowStart": window_start,
+        "windowEnd": window_end,
+        "moves": [
+            {"serialNo": d.get("SerialNo"), "partNo": d.get("PartNo"), "timeMoved": d.get("timeMoved")}
+            for d in docs
+        ],
     })
 
 
