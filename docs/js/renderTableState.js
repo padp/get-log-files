@@ -74,19 +74,27 @@ document.getElementById("loadEventsList").addEventListener("toggle", async (e) =
   if (container.dataset.loaded) return; // fetched once already; don't re-fetch on every re-open
 
   try {
-    const { moves } = await fetchNearbyMoves(details.dataset.recordedAt);
+    const delta = Number(details.dataset.delta);
+    const { bestFit } = await fetchNearbyMoves(details.dataset.recordedAt, delta);
     container.dataset.loaded = "true";
 
-    if (!moves || moves.length === 0) {
+    if (!bestFit) {
       container.innerHTML = "<i>No Plex moves found nearby.</i>";
       return;
     }
 
-    container.innerHTML = moves.map(m => `
+    const when = new Date(getDate(bestFit.timeMoved)).toLocaleString();
+    const countNote = bestFit.count === delta
+      ? `matches this delivery's count of ${delta}`
+      : `this delivery was ${delta}, closest batch found was ${bestFit.count}`;
+    const serialList = bestFit.serials.map(s => s.serialNo).join(", ");
+
+    container.innerHTML = `
       <div class="nearby-move-row">
-        <b>${m.serialNo}</b> (${m.partNo}) &mdash; moved ${new Date(getDate(m.timeMoved)).toLocaleString()}
+        <b>${bestFit.count} moved</b> at ${when} (${countNote})
+        <div class="load-event-time">${serialList}</div>
       </div>
-    `).join("");
+    `;
   } catch (err) {
     container.innerHTML = `<i>Failed to load: ${err.message}</i>`;
   }
@@ -237,11 +245,12 @@ export async function updateLoadEvents() {
       const when = new Date(getDate(ev.recordedAt));
       const label = REASON_LABEL[ev.reason] || ev.reason || "unknown";
 
-      // data-recorded-at drives the lazy nearby-moves fetch below -- an
-      // ISO string the API can parse directly, computed once here rather
-      // than re-deriving it from the row's displayed text later.
+      // data-recorded-at/data-delta drive the lazy best-fit fetch below --
+      // an ISO string the API can parse directly plus the count to score
+      // candidate batches against, both computed once here rather than
+      // re-deriving them from the row's displayed text later.
       return `
-        <details class="load-event-row" data-recorded-at="${when.toISOString()}">
+        <details class="load-event-row" data-recorded-at="${when.toISOString()}" data-delta="${ev.delta}">
           <summary>
             <span class="load-event-delta">+${ev.delta}</span>
             <b>${ev.newCount} on table</b> (${label})

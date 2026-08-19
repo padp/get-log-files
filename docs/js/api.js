@@ -136,13 +136,15 @@ export async function fetchGapCandidates(limit = 20) {
   return JSON.parse(text);
 }
 
-// Manual per-event drill-down -- Plex moves in a window around one
-// delivery event's recordedAt, for a human to eyeball. Not an assertion
-// that these ARE the matching serials (see api/app.py's docstring on why
-// per-event timing is unreliable) -- just what Plex activity happened
-// nearby, same neutral framing as fetchGapCandidates.
-export async function fetchNearbyMoves(time, { beforeMinutes = 60, afterMinutes = 15 } = {}) {
+// Manual per-event drill-down -- the best-fit Plex move batch (grouped by
+// identical timeMoved, scored by how closely its size matches delta, then
+// by time proximity) around one delivery event's recordedAt. Not an
+// assertion that this IS the matching batch (see api/app.py's docstring
+// on why per-event timing is unreliable) -- a best-effort suggestion for
+// a human to sanity-check, same neutral framing as fetchGapCandidates.
+export async function fetchNearbyMoves(time, delta, { beforeMinutes = 60, afterMinutes = 15 } = {}) {
   const params = new URLSearchParams({ time, beforeMinutes, afterMinutes });
+  if (delta != null) params.set("delta", delta);
   const response = await fetch(`${API_BASE}/api/table-state/nearby-moves?${params}`);
   const text = await response.text();
 

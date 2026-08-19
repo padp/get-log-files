@@ -463,19 +463,29 @@ def table_state_gap_candidates():
 @app.route("/api/table-state/nearby-moves", methods=["GET"])
 def table_state_nearby_moves():
     """
-    Manual per-event drill-down: given one delivery event's recordedAt,
-    what Plex moves (log_files.timeMoved) happened in a window around it?
+    Manual per-event drill-down: given one delivery event's recordedAt (and,
+    optionally, its delta -- how many logs that event added), what Plex
+    moves (log_files.timeMoved) happened around it?
 
-    Deliberately NOT an automated match -- /api/table-state/events'
-    docstring already covers why comparing individual event timing is
-    unreliable (a delivery's recordedAt is when consensus finally agreed,
-    not when the log arrived, and that lag is unpredictable). This endpoint
-    exists for a human to look at, not for the system to assert "these are
-    the serials" -- it returns everything Plex-side in the window and lets
-    a person judge, the same reasoning that keeps /api/table-state/gap-candidates
-    from hard-filtering by job. Window defaults wide and skewed backward
-    (beforeMinutes > afterMinutes) since the real Plex move is more likely
-    to have happened before a laggy consensus timestamp than after it.
+    Plex moves land in clean batches at an identical timeMoved (one
+    material-handler scan = one batch, confirmed on real data -- see
+    api/reconciliation.py's module docstring). So rather than dumping every
+    move in a wide window, this groups them into those batches and, when
+    delta is given, scores each batch by (a) how closely its size matches
+    delta and (b) how close in time it is to the delivery -- size match
+    first, time as the tiebreaker, since "how many logs were moved" is the
+    direct question being asked ("find the amount that were loaded at that
+    time"). The best-scoring batch is returned as bestFit.
+
+    Still deliberately NOT an automated assertion -- /api/table-state/events'
+    docstring already covers why per-event timing is unreliable (a
+    delivery's recordedAt is when consensus finally agreed, not when the
+    log arrived, and that lag is unpredictable). bestFit is a best-effort
+    suggestion for a human to sanity-check, not a claim of certainty --
+    the full batch list is still returned alongside it for that reason.
+    Window defaults wide and skewed backward (beforeMinutes > afterMinutes)
+    since the real Plex move is more likely to have happened before a
+    laggy consensus timestamp than after it.
     """
 
     time_param = request.args.get("time")
@@ -486,6 +496,14 @@ def table_state_nearby_moves():
         center = datetime.fromisoformat(time_param.replace("Z", "+00:00")).replace(tzinfo=None)
     except ValueError:
         return {"error": "time must be a valid ISO 8601 timestamp"}, 400
+
+    delta_param = request.args.get("delta")
+    delta = None
+    if delta_param is not None:
+        try:
+            delta = int(delta_param)
+        except ValueError:
+            return {"error": "delta must be an integer"}, 400
 
     before_minutes = min(float(request.args.get("beforeMinutes", 60)), 24 * 60)
     after_minutes = min(float(request.args.get("afterMinutes", 15)), 24 * 60)
@@ -500,13 +518,35 @@ def table_state_nearby_moves():
         ).sort("timeMoved", 1)
     )
 
+    batches_by_time = {}
+    for d in docs:
+        ts = d["timeMoved"]
+        batches_by_time.setdefault(ts, []).append(
+            {"serialNo": d.get("SerialNo"), "partNo": d.get("PartNo")}
+        )
+
+    batches = [
+        {"timeMoved": ts, "count": len(serials), "serials": serials}
+        for ts, serials in sorted(batches_by_time.items())
+    ]
+
+    best_fit = None
+    if batches:
+        if delta is not None:
+            def score(b):
+                size_diff = abs(b["count"] - delta)
+                time_diff = abs((b["timeMoved"] - center).total_seconds())
+                return (size_diff, time_diff)
+            best_fit = min(batches, key=score)
+        else:
+            # no delta given -- fall back to simple closest-in-time
+            best_fit = min(batches, key=lambda b: abs((b["timeMoved"] - center).total_seconds()))
+
     return dumps({
         "windowStart": window_start,
         "windowEnd": window_end,
-        "moves": [
-            {"serialNo": d.get("SerialNo"), "partNo": d.get("PartNo"), "timeMoved": d.get("timeMoved")}
-            for d in docs
-        ],
+        "bestFit": best_fit,
+        "batches": batches,
     })
 
 
