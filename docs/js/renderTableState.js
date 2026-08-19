@@ -1,4 +1,4 @@
-import { fetchTableState, fetchTableStateEvents, fetchTableStateReconciliation, fetchGapCandidates, fetchNearbyMoves, tableStateImageUrl, submitTableStateOverride } from "./api.js";
+import { fetchTableState, fetchTableStateEvents, fetchTableStateReconciliation, fetchNearbyMoves, tableStateImageUrl, submitTableStateOverride } from "./api.js";
 import { getDate } from "./dateUtils.js";
 
 const STALE_THRESHOLD_MS = 5 * 60 * 1000; // collector polls every ~60s; 5x that is a generous "still alive" window
@@ -142,6 +142,72 @@ export async function updateTableState() {
   }
 }
 
+//--------------------------------------------------
+// Gap alert sound -- a repeating chime while gapAlert is active, so
+// someone in the room (not necessarily looking at the screen) notices,
+// not just a silent color change. Generated with the Web Audio API
+// directly rather than an audio file to host. Repeats every
+// ALARM_REPEAT_MS while unresolved (a single one-shot beep could be
+// missed by exactly the "wasn't looking right then" person this is for)
+// and stops automatically the moment gapAlert clears.
+//--------------------------------------------------
+const ALARM_REPEAT_MS = 5 * 60 * 1000;
+
+let audioCtx = null;
+let lastAlarmPlayedAt = 0;
+let gapWasActive = false;
+
+function playAlarmTone() {
+  // Lazily created (and resumed) here rather than at module load -- most
+  // browsers block audio until there's been some user interaction on the
+  // page, so creating it at load time would just create it in a
+  // permanently suspended state anyway. Any click/tap anywhere on an
+  // already-open dashboard (or just loading it via a normal navigation)
+  // satisfies that requirement for the rest of the tab's lifetime.
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+
+  const beepAt = (startOffset, freq) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "square";
+    osc.frequency.value = freq;
+    gain.gain.value = 0.15;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const startTime = audioCtx.currentTime + startOffset;
+    osc.start(startTime);
+    osc.stop(startTime + 0.15);
+  };
+
+  // three short beeps, alternating pitch -- distinct enough to notice
+  // without being an actual siren
+  beepAt(0, 880);
+  beepAt(0.2, 880);
+  beepAt(0.4, 880);
+}
+
+function maybePlayGapAlarm(gapAlert) {
+  if (!gapAlert) {
+    gapWasActive = false; // next incident, even minutes later, gets its own immediate alert
+    return;
+  }
+
+  const now = Date.now();
+  const justStarted = !gapWasActive;
+  gapWasActive = true;
+
+  if (!justStarted && now - lastAlarmPlayedAt < ALARM_REPEAT_MS) return;
+
+  lastAlarmPlayedAt = now;
+  try {
+    playAlarmTone();
+  } catch (err) {
+    console.error("Gap alarm sound failed:", err);
+  }
+}
+
 // reason -> a short, human label for what triggered this delivery's count increase
 const REASON_LABEL = {
   camera_consensus: "camera",
@@ -178,54 +244,15 @@ export async function updateReconciliation() {
     // reconciliation.GAP_ALERT_THRESHOLD_MINUTES, which is the real signal
     // something's actually wrong rather than just still resolving.
     const bannerHtml = r.gapAlert
-      ? `&#9888; Gap open for ${Math.round(r.gapOpenMinutes)} min (since ${new Date(getDate(r.gapOpenSince)).toLocaleTimeString()}) -- check Log Bay candidates below`
+      ? `&#9888; Gap open for ${Math.round(r.gapOpenMinutes)} min (since ${new Date(getDate(r.gapOpenSince)).toLocaleTimeString()}) -- check the physical tags at the table against recent deliveries below`
       : "";
     if (banner.innerHTML !== bannerHtml) banner.innerHTML = bannerHtml;
 
     alertReasons.gapAlert = r.gapAlert;
     refreshStatusAlert();
-
-    await updateGapCandidates(r.gapAlert);
+    maybePlayGapAlarm(r.gapAlert);
   } catch (err) {
     console.error("Reconciliation check failed:", err);
-  }
-}
-
-async function updateGapCandidates(gapAlert) {
-  const section = document.getElementById("gapCandidatesSection");
-  const list = document.getElementById("gapCandidatesList");
-
-  // Only worth the extra Mongo query when there's actually an alert to act
-  // on -- no point fetching/rendering a candidate list every 30s cycle
-  // regardless of state.
-  if (!gapAlert) {
-    section.hidden = true;
-    return;
-  }
-
-  try {
-    const { candidates } = await fetchGapCandidates();
-    section.hidden = false;
-
-    if (!candidates || candidates.length === 0) {
-      const html = "<i>No serials currently staged at Log Bay.</i>";
-      if (list.innerHTML !== html) list.innerHTML = html;
-      return;
-    }
-
-    const html = candidates.map(c => {
-      const since = new Date(getDate(c.firstSeenAt));
-      return `
-        <div class="load-event-row">
-          <b>${c.serialNo}</b> (${c.partNo})
-          <div class="load-event-time">at Log Bay since ${since.toLocaleString()}</div>
-        </div>
-      `;
-    }).join("");
-
-    if (list.innerHTML !== html) list.innerHTML = html;
-  } catch (err) {
-    console.error("Gap candidates check failed:", err);
   }
 }
 

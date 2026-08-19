@@ -122,20 +122,6 @@ export async function fetchTableStateReconciliation(hours = null) {
   return JSON.parse(text);
 }
 
-// Candidate at-risk serials from PAD-Log Bay, oldest-staged first -- only
-// meaningful to fetch when fetchTableStateReconciliation()'s gapAlert is
-// true, see renderTableState.js.
-export async function fetchGapCandidates(limit = 20) {
-  const response = await fetch(`${API_BASE}/api/table-state/gap-candidates?limit=${limit}`);
-  const text = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${text}`);
-  }
-
-  return JSON.parse(text);
-}
-
 // Manual per-event drill-down -- the best-fit Plex move batch (grouped by
 // identical timeMoved, scored by how closely its size matches delta, then
 // by time proximity) around one delivery event's recordedAt. Not an

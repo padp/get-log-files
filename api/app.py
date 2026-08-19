@@ -56,8 +56,6 @@ table_events_collection = db["table_events"]
 
 table_state_image_collection = db["table_state_image"]
 
-log_bay_collection = db["log_bay_inventory"]
-
 # No index existed on timeMoved before this -- every sort/filter on it
 # (the inventory list, the dashboard shift query, scanner-health's
 # most-recent lookup) was a full collection scan, and the collection only
@@ -70,13 +68,6 @@ try:
     lf_collection.create_index([("timeMoved", -1)])
 except Exception as e:
     print(f"[STARTUP] Could not ensure timeMoved index (will retry next deploy/restart): {e}")
-
-# Serves /api/table-state/gap-candidates' exact filter+sort shape
-# (removedAt: None, sorted firstSeenAt ascending) directly.
-try:
-    log_bay_collection.create_index([("removedAt", 1), ("firstSeenAt", 1)])
-except Exception as e:
-    print(f"[STARTUP] Could not ensure log_bay_inventory index (will retry next deploy/restart): {e}")
 
 # Shared supervisory-override credential, not a real per-user login --
 # matches this app's existing security posture (nothing else here is
@@ -403,60 +394,6 @@ def table_state_reconciliation():
         "gapOpenSince": gap_status["gapOpenSince"],
         "gapOpenMinutes": gap_status["gapOpenMinutes"],
         "gapAlert": gap_status["gapAlert"],
-    })
-
-
-@app.route("/api/table-state/gap-candidates", methods=["GET"])
-def table_state_gap_candidates():
-    """
-    When /api/table-state/reconciliation's gapAlert is true, this is the
-    candidate list a material handler can actually check instead of a
-    blind physical inventory: everything currently believed to still be
-    sitting at PAD-Log Bay (collector/inventory.py's poll_log_bay_inventory,
-    same two-consecutive-miss removedAt confirmation as the main
-    PAD-Extrusion SHARED inventory), oldest first by firstSeenAt -- the
-    ones that have been staged longest are the most likely to be the ones
-    that got physically run without their Plex move ever catching up.
-
-    Deliberately NOT filtered to the active job's alloy/part -- there's no
-    confirmed mapping in this codebase from schedule_status's fields
-    (profile/dieCopy/alloy, raw press HMI values) to Plex's own PartNo
-    values, so hard-filtering on a guessed mapping risks silently hiding
-    the real candidate. activeJob is returned alongside the full list
-    instead, for a human to cross-check by eye.
-    """
-
-    limit = min(int(request.args.get("limit", 20) or 20), 100)
-
-    candidates = list(
-        log_bay_collection.find(
-            {"removedAt": None},
-            {"SerialNo": 1, "PartNo": 1, "Location": 1, "firstSeenAt": 1, "lastSeen": 1},
-        ).sort("firstSeenAt", 1).limit(limit)
-    )
-
-    active_job_doc = schedule_status_collection.find_one({"_id": "current"})
-    active_job = None
-    if active_job_doc:
-        active_job = {
-            "alloy": active_job_doc.get("alloy"),
-            "profile": active_job_doc.get("profile"),
-            "dieCopy": active_job_doc.get("dieCopy"),
-        }
-
-    return dumps({
-        "generatedAt": datetime.utcnow(),
-        "activeJob": active_job,
-        "candidates": [
-            {
-                "serialNo": c.get("SerialNo"),
-                "partNo": c.get("PartNo"),
-                "location": c.get("Location"),
-                "firstSeenAt": c.get("firstSeenAt"),
-                "lastSeen": c.get("lastSeen"),
-            }
-            for c in candidates
-        ],
     })
 
 

@@ -48,7 +48,7 @@ def _post(url, params, json, timeout=15):
     return resp
 
 
-def get_inventory_rows(location="PAD-Extrusion SHARED"):
+def get_inventory_rows():
     resp = _post(
         "https://cloud.plex.com/Inventory/InventoryByLocation/Search",
         params={
@@ -58,7 +58,7 @@ def get_inventory_rows(location="PAD-Extrusion SHARED"):
         },
         json={
             "BuildingCode": "Paducah",
-            "LocationInput": location,
+            "LocationInput": "PAD-Extrusion SHARED",
             "BuildingKey": "5208",
             "PCN": 0
         },

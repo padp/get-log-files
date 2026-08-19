@@ -363,11 +363,6 @@ body {
   display: none;
 }
 
-#gapCandidatesList {
-  max-height: 240px; /* same scroll-cap as #loadEventsList */
-  overflow-y: auto;
-}
-
 /* ------------------------------------------------------------ */
 /* Supervisory override                                          */
 /* ------------------------------------------------------------ */
