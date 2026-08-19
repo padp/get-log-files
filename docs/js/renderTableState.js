@@ -241,27 +241,60 @@ export async function updateLoadEvents() {
       return;
     }
 
-    const html = events.map(ev => {
-      const when = new Date(getDate(ev.recordedAt));
-      const label = REASON_LABEL[ev.reason] || ev.reason || "unknown";
+    // Node-level diff, same pattern as renderList.js's renderRows() --
+    // rows are <details> the user can expand into a lazy-fetched best-fit
+    // lookup (see the delegated toggle listener above); wholesale
+    // innerHTML replacement on every 30s poll was collapsing any row the
+    // user had open and discarding its already-fetched content. Keying on
+    // recordedAt (unique per event, to the millisecond) lets untouched
+    // rows -- the common case, since events rarely change once written --
+    // survive a refresh completely undisturbed.
+    const existing = new Map();
+    list.querySelectorAll(".load-event-row").forEach(el => existing.set(el.dataset.recordedAt, el));
 
-      // data-recorded-at/data-delta drive the lazy best-fit fetch below --
-      // an ISO string the API can parse directly plus the count to score
-      // candidate batches against, both computed once here rather than
-      // re-deriving them from the row's displayed text later.
-      return `
-        <details class="load-event-row" data-recorded-at="${when.toISOString()}" data-delta="${ev.delta}">
+    // Anything else -- the initial static "Checking..." placeholder, or a
+    // leftover "No deliveries recorded yet." message from a prior empty
+    // state -- isn't tracked by the diff above and would otherwise just
+    // sit there once real rows start getting appended.
+    list.querySelectorAll(":scope > *:not(.load-event-row)").forEach(el => el.remove());
+
+    const seen = new Set();
+
+    events.forEach(ev => {
+      const when = new Date(getDate(ev.recordedAt));
+      const key = when.toISOString();
+      seen.add(key);
+
+      let details = existing.get(key);
+
+      if (!details) {
+        const label = REASON_LABEL[ev.reason] || ev.reason || "unknown";
+
+        details = document.createElement("details");
+        details.className = "load-event-row";
+        details.dataset.recordedAt = key;
+        details.dataset.delta = ev.delta;
+        details.innerHTML = `
           <summary>
             <span class="load-event-delta">+${ev.delta}</span>
             <b>${ev.newCount} on table</b> (${label})
             <div class="load-event-time">${when.toLocaleString()}</div>
           </summary>
           <div class="nearby-moves"><i>Click to check nearby Plex activity...</i></div>
-        </details>
-      `;
-    }).join("");
+        `;
+      }
+      // else: an event we've already rendered -- leave it exactly as is,
+      // whatever open/loaded/fetched state it's currently in.
 
-    if (list.innerHTML !== html) list.innerHTML = html;
+      // appendChild on an already-attached node moves it -- iterating in
+      // the API's own (newest-first) order keeps list order correct
+      // without recreating untouched nodes.
+      list.appendChild(details);
+    });
+
+    existing.forEach((el, key) => {
+      if (!seen.has(key)) el.remove();
+    });
   } catch (err) {
     console.error("Load events check failed:", err);
   }
