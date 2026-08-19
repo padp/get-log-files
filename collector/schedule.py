@@ -202,12 +202,17 @@ def _find_current_index(entries, current_profile, current_die_copy, now):
     back to back, sometimes with Suffix filled in to disambiguate,
     sometimes not, and scheduled jobs are sometimes informally consolidated
     on the operator floor without the schedule being updated to reflect
-    it). So: narrow by Suffix when it actually disambiguates, then break
-    any remaining tie using operator-entered progress -- a row with a
-    Start time and no Stop time that's already passed is the one actually
-    in progress right now, even if earlier rows in the list look like they
-    got skipped over. If that still doesn't land on exactly one row, this
-    returns None rather than guess.
+    it). So: narrow by Suffix when it actually disambiguates. Suffix is the
+    PLC's own physical die-copy identity, so if that alone already lands on
+    exactly one row, trust it immediately -- don't also demand Start time
+    evidence, since operators routinely fill in Start time well after a job
+    has actually begun (confirmed live: a job already 59 billets into a
+    72-billet run with a uniquely-matching Die+Suffix still had a blank
+    Start cell). Only fall back to operator-entered progress -- a row with
+    a Start time and no Stop time that's already passed is the one actually
+    in progress right now -- to break a tie when Suffix genuinely leaves
+    more than one candidate. If that still doesn't land on exactly one row,
+    this returns None rather than guess.
     """
 
     die_matches = [
@@ -224,6 +229,9 @@ def _find_current_index(entries, current_profile, current_die_copy, now):
     ]
 
     candidates = suffix_matches or die_matches
+
+    if len(candidates) == 1:
+        return candidates[0]
 
     now_fraction = _day_fraction(now)
 

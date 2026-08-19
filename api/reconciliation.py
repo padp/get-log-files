@@ -22,11 +22,25 @@ GAP_ALERT_THRESHOLD_MINUTES = 30
 # the aggregate delivered/moved/netDifference numbers (shift-scoped, or an
 # arbitrary ?hours=). If a gap genuinely opened before that boundary,
 # replaying only from "since" would understate -- or miss entirely -- how
-# long it's actually been open. Real gaps close within tens of minutes per
-# validated data (worst case seen: 17.5 min), so a generous, independent
-# lookback comfortably covers any real gap regardless of where the display
-# window happens to start.
-GAP_LOOKBACK_HOURS = 4
+# long it's actually been open.
+#
+# Wide on purpose, for a second reason beyond just "cover a long-open gap":
+# this replay assumes delivered_total/moved_total are both 0 right at the
+# window's start, which is only true if the real running balance actually
+# was 0 at that instant. It usually isn't -- Plex moves normally land a
+# few minutes *ahead* of the matching camera confirmation, so at a random
+# clock-time cutoff the true balance is more often slightly negative
+# (moved briefly ahead) than exactly zero. A cutoff landing in the middle
+# of one of those moved-ahead stretches silently drops the "credit" of an
+# already-happened move, making the next real delivery look like a fresh,
+# unmatched gap-open even though it was already covered (confirmed live
+# 2026-08-19: a 4-hour window cut off a move 8 minutes before the window
+# start, manufacturing a 47-minute "gapAlert" that a full-shift replay
+# showed was actually reconciled to net 0 the whole time). Real batches
+# fully reconcile (diff returns to exactly 0) every 1-2 hours per
+# validated data, so a window this wide reliably starts from an
+# already-settled point instead of an arbitrary mid-stretch instant.
+GAP_LOOKBACK_HOURS = 24
 
 
 def compute_gap_status(delivered_events, moved_timestamps, now=None,
